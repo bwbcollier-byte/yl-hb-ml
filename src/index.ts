@@ -10,6 +10,7 @@ const BASE_ID = process.env.AIRTABLE_BASE_ID || 'appiYGWjEZVB76yyl';
 const TABLE_ID = process.env.AIRTABLE_TABLE_ID || 'tblQ3DrCHekgRqj7Z';
 const VIEW_NAME = process.env.AIRTABLE_VIEW_NAME || 'viwyL6dqnZWsdT7Sf';
 const LIMIT = process.env.LIMIT ? parseInt(process.env.LIMIT) : undefined;
+const CONCURRENCY = process.env.CONCURRENCY ? parseInt(process.env.CONCURRENCY) : 5;
 
 // Tracking record for checked artists (HB | Data | Process base)
 const TRACKING_BASE_ID = 'app9fa6QAvW2krtmv';
@@ -46,6 +47,7 @@ const RAPIDAPI_KEYS = [
 ];
 
 let currentKeyIndex = 0;
+let keyRotationLock = false;
 
 // Initialize Airtable
 Airtable.configure({ apiKey: AIRTABLE_TOKEN });
@@ -61,10 +63,19 @@ const toTitleCase = (str: string): string => {
 
 /**
  * Get next RapidAPI key (rotate through keys for rate limit distribution)
+ * Thread-safe with simple mutex
  */
-function getNextRapidAPIKey(): string {
+async function getNextRapidAPIKey(): Promise<string> {
+  // Simple spin-lock mutex
+  while (keyRotationLock) {
+    await sleep(10);
+  }
+  keyRotationLock = true;
+  
   const key = RAPIDAPI_KEYS[currentKeyIndex];
   currentKeyIndex = (currentKeyIndex + 1) % RAPIDAPI_KEYS.length;
+  
+  keyRotationLock = false;
   return key;
 }
 
@@ -73,8 +84,8 @@ function getNextRapidAPIKey(): string {
  */
 async function fetchSpotifyArtist(artistId: string, retries = 3): Promise<any> {
   for (let attempt = 1; attempt <= retries; attempt++) {
-    // Use the exact key from the working test
-    const apiKey = '730a02e172msh79ca9cab92fe41dp1b34a2jsnd53411309cd7';
+    // Rotate through all 11 API keys for rate limit distribution
+    const apiKey = await getNextRapidAPIKey();
     
     try {
       const requestBody = JSON.stringify({ id: artistId });
@@ -179,7 +190,7 @@ async function fetchSpotifyArtist(artistId: string, retries = 3): Promise<any> {
  */
 async function fetchArtistAlbums(artistId: string, retries = 3): Promise<any> {
   for (let attempt = 1; attempt <= retries; attempt++) {
-    const apiKey = getNextRapidAPIKey();
+    const apiKey = await getNextRapidAPIKey();
     
     try {
       const options = {
@@ -389,6 +400,7 @@ async function processRelatedArtists(relatedArtists: any[], sourceArtistName: st
   
   let createdCount = 0;
   let skippedCount = 0;
+  const recordsToCreate: any[] = [];
   
   for (const relatedArtist of relatedArtists) {
     const artistId = relatedArtist.id;
@@ -436,38 +448,39 @@ async function processRelatedArtists(relatedArtists: any[], sourceArtistName: st
       console.log(`   ⚠️  Could not check Research for ${artistName}, continuing...`);
     }
     
+    // Get avatar image URL
+    const avatarSources = relatedArtist.visuals?.avatarImage?.sources || [];
+    const imageUrl = avatarSources.length > 0 ? avatarSources[0].url : '';
+    
+    // Prepare record for batch create
+    const newRecord: any = {
+      'Name': artistName,
+      'Status': 'Todo',
+      'Soc Spotify Url': `https://open.spotify.com/artist/${artistId}`,
+      'Soc Spotify Id': artistId,
+      'Found Details': `Related artist to ${sourceArtistName}`
+    };
+    
+    if (imageUrl) {
+      newRecord['Image Url'] = imageUrl;
+      newRecord['Image'] = [{ url: imageUrl }];
+    }
+    
+    recordsToCreate.push({ fields: newRecord });
+  }
+  
+  // Batch create records (up to 10 at a time)
+  if (recordsToCreate.length > 0) {
     try {
-      // Get avatar image URL
-      const avatarSources = relatedArtist.visuals?.avatarImage?.sources || [];
-      const imageUrl = avatarSources.length > 0 ? avatarSources[0].url : '';
-      
-      // Create research record (only if not found in any of the 3 places)
-      const newRecord: any = {
-        'Name': artistName,
-        'Status': 'Todo',
-        'Soc Spotify Url': `https://open.spotify.com/artist/${artistId}`,
-        'Soc Spotify Id': artistId,
-        'Found Details': `Related artist to ${sourceArtistName}`
-      };
-      
-      if (imageUrl) {
-        newRecord['Image Url'] = imageUrl;
-        // Add as attachment
-        newRecord['Image'] = [{
-          url: imageUrl
-        }];
+      for (let i = 0; i < recordsToCreate.length; i += 10) {
+        const batch = recordsToCreate.slice(i, i + 10);
+        await researchBase('tbldc6ULyrhzRosvR').create(batch);
+        createdCount += batch.length;
+        console.log(`   ✨ Batch created ${batch.length} research records`);
+        await sleep(200); // Rate limiting between batches
       }
-      
-      await researchBase('tbldc6ULyrhzRosvR').create(newRecord);
-      createdCount++;
-      
-      console.log(`   ✨ Created research record for: ${artistName}`);
-      
-      // Small delay to avoid rate limits
-      await sleep(100);
-      
     } catch (error: any) {
-      console.error(`   ⚠️  Failed to create research record for ${artistName}:`, error.message);
+      console.error(`   ⚠️  Failed to batch create research records:`, error.message);
     }
   }
   
@@ -523,6 +536,7 @@ async function processAlbums(artistSpotifyId: string, artistName: string, profil
     const newAlbumIds: string[] = [];
     const newAlbumUrls: string[] = [];
     const newAlbumNames: string[] = [];
+    const recordsToCreate: any[] = [];
     
     for (const albumGroup of albums) {
       // Each album group can have multiple releases
@@ -569,55 +583,57 @@ async function processAlbums(artistSpotifyId: string, artistName: string, profil
           console.log(`   ⚠️  Could not check Albums table for ${albumName}, continuing...`);
         }
         
-        // Create album record
-        try {
-          const albumRecord: any = {
-            'Album Name': albumName,
-            'Artist Name': artistName,
-            'Status': 'Todo',
-            'Spotify Album Id': albumId,
-            'Spotify Artist Id': artistSpotifyId,
-            'Spotify Artist Name': artistName,
-            'Spotify Type': albumType.charAt(0).toUpperCase() + albumType.slice(1).toLowerCase()
-          };
-          
-          if (coverArtUrl) {
-            albumRecord['Cover Art Url'] = coverArtUrl;
-            albumRecord['Cover Art'] = [{ url: coverArtUrl }];
-          }
-          
-          if (albumUrl) {
-            albumRecord['Spotify Album Url'] = albumUrl;
-          }
-          
-          if (releaseDate) {
-            albumRecord['Release Date'] = releaseDate;
-          }
-          
-          if (releaseYear) {
-            albumRecord['Release Year'] = releaseYear;
-          }
-          
-          if (trackCount) {
-            albumRecord['Track Count'] = trackCount;
-          }
-          
-          await albumsBase(ALBUMS_TABLE_ID).create(albumRecord);
-          createdCount++;
-          
-          // Track for updating profile and tracking records
-          newAlbumIds.push(albumId);
-          newAlbumUrls.push(albumUrl || '');
-          newAlbumNames.push(albumName);
-          
-          console.log(`   ✨ Created album: ${albumName} (${releaseYear})`);
-          
-          // Small delay to avoid rate limits
-          await sleep(100);
-          
-        } catch (error: any) {
-          console.error(`   ⚠️  Failed to create album ${albumName}:`, error.message);
+        // Prepare album record for batch create
+        const albumRecord: any = {
+          'Album Name': albumName,
+          'Artist Name': artistName,
+          'Status': 'Todo',
+          'Spotify Album Id': albumId,
+          'Spotify Artist Id': artistSpotifyId,
+          'Spotify Artist Name': artistName,
+          'Spotify Type': albumType.charAt(0).toUpperCase() + albumType.slice(1).toLowerCase()
+        };
+        
+        if (coverArtUrl) {
+          albumRecord['Cover Art Url'] = coverArtUrl;
+          albumRecord['Cover Art'] = [{ url: coverArtUrl }];
         }
+        
+        if (albumUrl) {
+          albumRecord['Spotify Album Url'] = albumUrl;
+        }
+        
+        if (releaseDate) {
+          albumRecord['Release Date'] = releaseDate;
+        }
+        
+        if (releaseYear) {
+          albumRecord['Release Year'] = releaseYear;
+        }
+        
+        if (trackCount) {
+          albumRecord['Track Count'] = trackCount;
+        }
+        
+        recordsToCreate.push({ fields: albumRecord });
+        newAlbumIds.push(albumId);
+        newAlbumUrls.push(albumUrl || '');
+        newAlbumNames.push(albumName);
+      }
+    }
+    
+    // Batch create albums (up to 10 at a time)
+    if (recordsToCreate.length > 0) {
+      try {
+        for (let i = 0; i < recordsToCreate.length; i += 10) {
+          const batch = recordsToCreate.slice(i, i + 10);
+          await albumsBase(ALBUMS_TABLE_ID).create(batch);
+          createdCount += batch.length;
+          console.log(`   ✨ Batch created ${batch.length} albums`);
+          await sleep(200); // Rate limiting between batches
+        }
+      } catch (error: any) {
+        console.error(`   ⚠️  Failed to batch create albums:`, error.message);
       }
     }
     
@@ -669,6 +685,7 @@ async function processConcertArtists(concertArtists: any[], concertTitle: string
   const checkedIds = (trackingRecord.get('Checked Ids') as string || '').split(',').map(s => s.trim()).filter(Boolean);
   
   let createdCount = 0;
+  const recordsToCreate: any[] = [];
   
   for (const artist of concertArtists) {
     const artistId = artist.id;
@@ -713,26 +730,30 @@ async function processConcertArtists(concertArtists: any[], concertTitle: string
       // Continue if check fails
     }
     
+    // Prepare record for batch create
+    const newRecord: any = {
+      'Name': artistName,
+      'Status': 'Todo',
+      'Soc Spotify Url': `https://open.spotify.com/artist/${artistId}`,
+      'Soc Spotify Id': artistId,
+      'Found Details': `Artist from concert: ${concertTitle}`
+    };
+    
+    recordsToCreate.push({ fields: newRecord });
+  }
+  
+  // Batch create records (up to 10 at a time)
+  if (recordsToCreate.length > 0) {
     try {
-      // Create research record (only if not found in any of the 3 places)
-      const newRecord: any = {
-        'Name': artistName,
-        'Status': 'Todo',
-        'Soc Spotify Url': `https://open.spotify.com/artist/${artistId}`,
-        'Soc Spotify Id': artistId,
-        'Found Details': `Artist from concert: ${concertTitle}`
-      };
-      
-      await researchBase('tbldc6ULyrhzRosvR').create(newRecord);
-      createdCount++;
-      
-      console.log(`      🎤 Created research record for concert artist: ${artistName}`);
-      
-      // Small delay to avoid rate limits
-      await sleep(100);
-      
+      for (let i = 0; i < recordsToCreate.length; i += 10) {
+        const batch = recordsToCreate.slice(i, i + 10);
+        await researchBase('tbldc6ULyrhzRosvR').create(batch);
+        createdCount += batch.length;
+        console.log(`      🎤 Batch created ${batch.length} concert artist research records`);
+        await sleep(200); // Rate limiting between batches
+      }
     } catch (error: any) {
-      console.error(`      ⚠️  Failed to create research record for ${artistName}:`, error.message);
+      console.error(`      ⚠️  Failed to batch create concert artist research records:`, error.message);
     }
   }
   
@@ -771,6 +792,8 @@ async function processConcerts(concerts: any[], artistName: string, artistSpotif
     const newConcertIds: string[] = [];
     const newConcertUrls: string[] = [];
     const newConcertNames: string[] = [];
+    const recordsToCreate: any[] = [];
+    const concertArtistsToProcess: { artists: any[], title: string }[] = [];
     
     for (const concert of concerts) {
       const concertId = concert.id;
@@ -821,96 +844,101 @@ async function processConcerts(concerts: any[], artistName: string, artistSpotif
         console.log(`   ⚠️  Could not check Concerts table for ${concertTitle}, continuing...`);
       }
       
-      // Create concert record
-      try {
-        // Helper function to title-case strings
-        const toTitleCase = (str: string) => {
-          if (!str) return str;
-          return str.split(' ').map(word => 
-            word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
-          ).join(' ');
-        };
-        
-        const concertRecord: any = {
-          'Title': toTitleCase(concertTitle),
-          'Status': 'Todo',
-          'Spotify Id': concertId,
-          'Spotify Title': toTitleCase(concertTitle)
-        };
-        
-        if (concertUrl) {
-          concertRecord['Spotify Url'] = concertUrl;
-        }
-        
-        if (category) {
-          concertRecord['Spotify Category'] = toTitleCase(category);
-        }
-        
-        if (festival !== undefined && festival !== null) {
-          // Festival is likely a boolean field
-          concertRecord['Spotify Festival'] = festival ? 'Yes' : 'No';
-        }
-        
-        if (venueName) {
-          concertRecord['Spotify Venue Name'] = toTitleCase(venueName);
-        }
-        
-        if (locationName) {
-          concertRecord['Spotify Location Name'] = toTitleCase(locationName);
-        }
-        
-        if (latitude) {
-          concertRecord['Spotify Latitude'] = latitude;
-        }
-        
-        if (longitude) {
-          concertRecord['Spotify Longitude'] = longitude;
-        }
-        
-        if (artistUrls.length > 0) {
-          concertRecord['Spotify Artist Urls'] = artistUrls.join(',');
-        }
-        
-        if (artistIds.length > 0) {
-          concertRecord['Spotify Artist Ids'] = artistIds.join(',');
-        }
-        
-        if (artistNames.length > 0) {
-          concertRecord['Spotify Artist Names'] = artistNames.map((name: string) => toTitleCase(name)).join(',');
-        }
-        
-        if (date) {
-          // Convert ISO string to date-only format YYYY-MM-DD
-          try {
-            const dateObj = new Date(date);
-            const dateOnly = dateObj.toISOString().split('T')[0];
-            concertRecord['Spotify Date'] = dateOnly;
-          } catch (e) {
-            console.log(`   ⚠️  Could not parse date: ${date}`);
-          }
-        }
-        
-        await concertsBase(CONCERTS_TABLE_ID).create(concertRecord);
-        createdCount++;
-        
-        // Track for updating profile and tracking records
-        newConcertIds.push(concertId);
-        newConcertUrls.push(concertUrl || '');
-        newConcertNames.push(concertTitle);
-        
-        console.log(`   ✨ Created concert: ${concertTitle} (${date ? new Date(date).toLocaleDateString() : 'No date'})`);
-        
-        // Process concert artists to create research records for new artists
-        if (artistsArray && artistsArray.length > 0) {
-          await processConcertArtists(artistsArray, concertTitle);
-        }
-        
-        // Small delay to avoid rate limits
-        await sleep(100);
-        
-      } catch (error: any) {
-        console.error(`   ⚠️  Failed to create concert ${concertTitle}:`, error.message);
+      // Helper function to title-case strings
+      const toTitleCase = (str: string) => {
+        if (!str) return str;
+        return str.split(' ').map(word => 
+          word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+        ).join(' ');
+      };
+      
+      // Prepare concert record for batch create
+      const concertRecord: any = {
+        'Title': toTitleCase(concertTitle),
+        'Status': 'Todo',
+        'Spotify Id': concertId,
+        'Spotify Title': toTitleCase(concertTitle)
+      };
+      
+      if (concertUrl) {
+        concertRecord['Spotify Url'] = concertUrl;
       }
+      
+      if (category) {
+        concertRecord['Spotify Category'] = toTitleCase(category);
+      }
+      
+      if (festival !== undefined && festival !== null) {
+        concertRecord['Spotify Festival'] = festival ? 'Yes' : 'No';
+      }
+      
+      if (venueName) {
+        concertRecord['Spotify Venue Name'] = toTitleCase(venueName);
+      }
+      
+      if (locationName) {
+        concertRecord['Spotify Location Name'] = toTitleCase(locationName);
+      }
+      
+      if (latitude) {
+        concertRecord['Spotify Latitude'] = latitude;
+      }
+      
+      if (longitude) {
+        concertRecord['Spotify Longitude'] = longitude;
+      }
+      
+      if (artistUrls.length > 0) {
+        concertRecord['Spotify Artist Urls'] = artistUrls.join(',');
+      }
+      
+      if (artistIds.length > 0) {
+        concertRecord['Spotify Artist Ids'] = artistIds.join(',');
+      }
+      
+      if (artistNames.length > 0) {
+        concertRecord['Spotify Artist Names'] = artistNames.map((name: string) => toTitleCase(name)).join(',');
+      }
+      
+      if (date) {
+        try {
+          const dateObj = new Date(date);
+          const dateOnly = dateObj.toISOString().split('T')[0];
+          concertRecord['Spotify Date'] = dateOnly;
+        } catch (e) {
+          console.log(`   ⚠️  Could not parse date: ${date}`);
+        }
+      }
+      
+      recordsToCreate.push({ fields: concertRecord });
+      newConcertIds.push(concertId);
+      newConcertUrls.push(concertUrl || '');
+      newConcertNames.push(concertTitle);
+      
+      // Collect concert artists to process after batch create
+      if (artistsArray && artistsArray.length > 0) {
+        concertArtistsToProcess.push({ artists: artistsArray, title: concertTitle });
+      }
+    }
+    
+    // Batch create concerts (up to 10 at a time)
+    if (recordsToCreate.length > 0) {
+      try {
+        for (let i = 0; i < recordsToCreate.length; i += 10) {
+          const batch = recordsToCreate.slice(i, i + 10);
+          await concertsBase(CONCERTS_TABLE_ID).create(batch);
+          createdCount += batch.length;
+          console.log(`   ✨ Batch created ${batch.length} concerts`);
+          await sleep(200); // Rate limiting between batches
+        }
+      } catch (error: any) {
+        console.error(`   ⚠️  Failed to batch create concerts:`, error.message);
+      }
+    }
+    
+    // Process concert artists after all concerts are created
+    for (const { artists, title } of concertArtistsToProcess) {
+      await processConcertArtists(artists, title);
     }
     
     // Step Two: Update profile record's "Soc SP Concert Ids"
@@ -1272,6 +1300,7 @@ async function enrichArtist(recordId: string, spotifyId: string, artistName: str
 async function main() {
   console.log('🎵 Spotify Artist Enrichment Started');
   console.log('🔑 Using RapidAPI with key rotation (11 keys)');
+  console.log(`⚡ Parallel processing: ${CONCURRENCY} artists at a time`);
   console.log(`📊 Base: ${BASE_ID}`);
   console.log(`📋 Table: ${TABLE_ID}`);
   console.log(`👁️  View: ${VIEW_NAME}`);
@@ -1297,43 +1326,53 @@ async function main() {
     let skipped = 0;
     let errors = 0;
 
-    for (const record of records) {
-      const spotifyId = record.get('Soc Spotify Id') as string;
-      const artistName = record.get('Name') || record.get('Profile Name') || 'Unknown Artist';
+    // Process artists in parallel batches
+    for (let i = 0; i < records.length; i += CONCURRENCY) {
+      const batch = records.slice(i, i + CONCURRENCY);
+      console.log(`\n🔄 Processing batch ${Math.floor(i / CONCURRENCY) + 1}/${Math.ceil(records.length / CONCURRENCY)} (${batch.length} artists)...\n`);
+      
+      const promises = batch.map(async (record) => {
+        const spotifyId = record.get('Soc Spotify Id') as string;
+        const artistName = record.get('Name') || record.get('Profile Name') || 'Unknown Artist';
 
-      if (!spotifyId) {
-        console.log(`⏭️  Skipping ${artistName}: No Spotify ID`);
-        skipped++;
-        continue;
-      }
-
-      try {
-        // Get existing field values to check which social fields are empty
-        const existingFields: any = {};
-        const socialFields = [
-          'Soc Instagram Url', 'Soc Facebook', 'Soc Youtube', 'Soc Tiktok',
-          'Soc Bandsintown', 'Soc Twitter', 'Soc Shazam', 'Soc Apple Music Url',
-          'Soc Website', 'Soc Amazon Music', 'Soc Chartmetric', 'Soc Soundcloud',
-          'Soc Wikipedia', 'Soc Musicbrainz', 'Soc Songkick', 'Soc Deezer',
-          'Soc Itunes', 'Soc Lastfm', 'Soc Googletrends', 'Soc Pandora',
-          'Soc Tidal', 'Soc IMDb', 'Soc Iheartradio', 'Soc Discogs',
-          'Soc Beatport', 'Soc Audiomack', 'Soc Amazon Store'
-        ];
-        
-        for (const field of socialFields) {
-          existingFields[field] = record.get(field) || '';
+        if (!spotifyId) {
+          console.log(`⏭️  Skipping ${artistName}: No Spotify ID`);
+          skipped++;
+          return;
         }
-        
-        await enrichArtist(record.id, spotifyId, artistName, existingFields);
-        processed++;
-      } catch (error) {
-        errors++;
-      }
 
-      // Rate limiting: 600ms delay between artists (prevents hitting 1000 RPH limit)
-      // 1000 requests/hour = 16.67 requests/minute = ~3.6 seconds/request safe
-      // With 11 keys rotating: 600ms is safe
-      await sleep(600);
+        try {
+          // Get existing field values to check which social fields are empty
+          const existingFields: any = {};
+          const socialFields = [
+            'Soc Instagram Url', 'Soc Facebook', 'Soc Youtube', 'Soc Tiktok',
+            'Soc Bandsintown', 'Soc Twitter', 'Soc Shazam', 'Soc Apple Music Url',
+            'Soc Website', 'Soc Amazon Music', 'Soc Chartmetric', 'Soc Soundcloud',
+            'Soc Wikipedia', 'Soc Musicbrainz', 'Soc Songkick', 'Soc Deezer',
+            'Soc Itunes', 'Soc Lastfm', 'Soc Googletrends', 'Soc Pandora',
+            'Soc Tidal', 'Soc IMDb', 'Soc Iheartradio', 'Soc Discogs',
+            'Soc Beatport', 'Soc Audiomack', 'Soc Amazon Store'
+          ];
+          
+          for (const field of socialFields) {
+            existingFields[field] = record.get(field) || '';
+          }
+          
+          await enrichArtist(record.id, spotifyId, artistName, existingFields);
+          processed++;
+        } catch (error) {
+          errors++;
+        }
+      });
+      
+      // Wait for all artists in this batch to complete
+      await Promise.all(promises);
+      
+      // Rate limiting between batches (not between individual artists)
+      // With 5 concurrent requests and 11 keys rotating, we're well within limits
+      if (i + CONCURRENCY < records.length) {
+        await sleep(1000); // 1 second between batches
+      }
     }
 
     console.log('\n✅ Processing Complete!');
