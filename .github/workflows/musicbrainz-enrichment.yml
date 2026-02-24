@@ -37,7 +37,7 @@ jobs:
           AUDIODB_API_KEY: ${{ secrets.AUDIODB_API_KEY }}
           AIRTABLE_BASE_ID: appiYGWjEZVB76yyl
           AIRTABLE_TABLE_ID: tblQ3DrCHekgRqj7Z
-          AIRTABLE_VIEW_NAME: Musicbrainz
+          AIRTABLE_VIEW_NAME: Musicbrainz Process
           ALBUMS_BASE_ID: appYXhhXgVkSblLdl
           ALBUMS_TABLE_ID: tblYaSMImRbOr9CX3
           LIMIT: ${{ github.event.inputs.limit }}
