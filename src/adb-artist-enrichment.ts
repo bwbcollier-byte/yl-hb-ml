@@ -215,27 +215,43 @@ async function processArtist(record: any): Promise<{ id: string; fields: any } |
   
   if (!artistData) {
     console.log(`   ❌ No AudioDB data found via MusicBrainz ID or name search`);
-    return null;
+    
+    // Set Not Found status
+    const now = new Date();
+    const timestamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const updateDetails = `${timestamp} - Not Found: No AudioDB data available for this artist`;
+    const existingUpdates = record.fields['ADB Updates'] || '';
+    
+    return {
+      id: recordId,
+      fields: {
+        'Soc ADB Status': 'Not Found',
+        'ADB Updates': existingUpdates ? `${existingUpdates}\n${updateDetails}` : updateDetails,
+        'Soc ADB Check': timestamp
+      }
+    };
   }
   
   console.log(`   ✅ Found TheAudioDB data`);
   
   // Prepare update fields
   const updateFields: any = {};
+  const updatedFieldsList: string[] = [];
   
   // Prepare current date for ADB Check field (YYYY-MM-DD format)
   const now = new Date();
   const year = now.getFullYear();
   const month = String(now.getMonth() + 1).padStart(2, '0');
   const day = String(now.getDate()).padStart(2, '0');
+  const timestamp = `${year}-${month}-${day}`;
   
   // Basic Info
-  if (artistData.idArtist) updateFields['Soc ADB Artist ID'] = artistData.idArtist;
-  if (artistData.strArtist) updateFields['Soc ADB Artist'] = artistData.strArtist;
-  if (artistData.strArtistStripped) updateFields['Soc ADB ArtistStripped'] = artistData.strArtistStripped;
-  if (artistData.strArtistAlternate) updateFields['Soc ADB Artist Alternate'] = artistData.strArtistAlternate;
-  if (artistData.strLabel) updateFields['Soc ADB Label'] = artistData.strLabel;
-  if (artistData.idLabel) updateFields['Soc ADB Label Id'] = artistData.idLabel;
+  if (artistData.idArtist) { updateFields['Soc ADB Artist ID'] = artistData.idArtist; updatedFieldsList.push('Artist ID'); }
+  if (artistData.strArtist) { updateFields['Soc ADB Artist'] = artistData.strArtist; updatedFieldsList.push('Artist Name'); }
+  if (artistData.strArtistStripped) { updateFields['Soc ADB ArtistStripped'] = artistData.strArtistStripped; updatedFieldsList.push('Artist Stripped'); }
+  if (artistData.strArtistAlternate) { updateFields['Soc ADB Artist Alternate'] = artistData.strArtistAlternate; updatedFieldsList.push('Artist Alternate'); }
+  if (artistData.strLabel) { updateFields['Soc ADB Label'] = artistData.strLabel; updatedFieldsList.push('Label'); }
+  if (artistData.idLabel) { updateFields['Soc ADB Label Id'] = artistData.idLabel; updatedFieldsList.push('Label ID'); }
   
   // Years
   if (artistData.intFormedYear) updateFields['Soc ADB Formed Year'] = artistData.intFormedYear;
@@ -323,9 +339,23 @@ async function processArtist(record: any): Promise<{ id: string; fields: any } |
   }
   
   // Set ADB Check date
-  updateFields['Soc ADB Check'] = `${year}-${month}-${day}`;
+  updateFields['Soc ADB Check'] = timestamp;
   
-  console.log(`   ✅ Prepared update with ${Object.keys(updateFields).length} fields`);
+  // Check if this is a new record or update
+  const isNewRecord = !record.fields['Soc ADB Artist ID'];
+  const status = isNewRecord ? 'Complete' : 'Updated';
+  
+  // Set status
+  updateFields['Soc ADB Status'] = status;
+  
+  // Build update details message
+  const updateDetails = `${timestamp} - ${status}: ${updatedFieldsList.length} fields updated (${updatedFieldsList.join(', ')})`;
+  
+  // Append to existing updates or create new
+  const existingUpdates = record.fields['ADB Updates'] || '';
+  updateFields['ADB Updates'] = existingUpdates ? `${existingUpdates}\n${updateDetails}` : updateDetails;
+  
+  console.log(`   ✅ Prepared update with ${Object.keys(updateFields).length} fields (${status})`);
   
   return {
     id: recordId,
@@ -381,6 +411,23 @@ async function main() {
           console.log(`   💾 Updated successfully`);
         } catch (error) {
           console.error(`   ❌ Error updating record:`, error);
+          
+          // Try to set Error status
+          try {
+            const now = new Date();
+            const timestamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            const updateDetails = `${timestamp} - Error: ${errorMsg}`;
+            const existingUpdates = record.fields['ADB Updates'] || '';
+            
+            await base(TABLE_ID).update(updateData.id, {
+              'Soc ADB Status': 'Error',
+              'ADB Updates': existingUpdates ? `${existingUpdates}\n${updateDetails}` : updateDetails
+            });
+          } catch (statusError) {
+            console.error(`   ⚠️  Could not set error status:`, statusError);
+          }
+          
           skipped++;
         }
       } else {
