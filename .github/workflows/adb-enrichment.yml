@@ -1,0 +1,45 @@
+name: ADB Artist Enrichment
+
+on:
+  schedule:
+    # Run daily at 3 AM UTC (1 hour after Spotify enrichment)
+    - cron: '0 3 * * *'
+  workflow_dispatch: # Allow manual triggers
+
+jobs:
+  enrich:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build TypeScript
+        run: npm run build
+
+      - name: Run ADB enrichment
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE_ID: appiYGWjEZVB76yyl
+          AIRTABLE_TABLE_ID: tblQ3DrCHekgRqj7Z
+          AIRTABLE_VIEW_NAME: ADB Process
+          AUDIODB_API_KEY: ${{ secrets.AUDIODB_API_KEY }}
+        run: node dist/adb-artist-enrichment.js
+
+      - name: Report status
+        if: always()
+        run: |
+          if [ ${{ job.status }} == 'success' ]; then
+            echo "✅ ADB enrichment completed successfully"
+          else
+            echo "❌ ADB enrichment failed"
+          fi
