@@ -399,36 +399,59 @@ async function main() {
     
     let processed = 0;
     let skipped = 0;
+    let updateBatch: any[] = [];
+    const BATCH_SIZE = 10;
     
     // Process records sequentially (with rate limiting)
-    for (const record of records) {
+    for (let i = 0; i < records.length; i++) {
+      const record = records[i];
       const updateData = await processArtist(record);
       
       if (updateData) {
-        try {
-          await base(TABLE_ID).update(updateData.id, updateData.fields);
-          processed++;
-          console.log(`   💾 Updated successfully`);
-        } catch (error) {
-          console.error(`   ❌ Error updating record:`, error);
-          
-          // Try to set Error status
+        updateBatch.push(updateData);
+        console.log(`   📦 Added to batch (${updateBatch.length}/${BATCH_SIZE})`);
+        
+        // Update when batch is full or it's the last record
+        if (updateBatch.length === BATCH_SIZE || i === records.length - 1) {
           try {
-            const now = new Date();
-            const timestamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-            const errorMsg = error instanceof Error ? error.message : String(error);
-            const updateDetails = `${timestamp} - Error: ${errorMsg}`;
-            const existingUpdates = record.fields['ADB Updates'] || '';
+            console.log(`\n💾 Updating batch of ${updateBatch.length} records...`);
+            await base(TABLE_ID).update(updateBatch);
+            processed += updateBatch.length;
+            console.log(`✅ Batch updated successfully\n`);
+            updateBatch = [];
+          } catch (error) {
+            console.error(`❌ Error updating batch:`, error);
             
-            await base(TABLE_ID).update(updateData.id, {
-              'Soc ADB Status': 'Error',
-              'ADB Updates': existingUpdates ? `${existingUpdates}\n${updateDetails}` : updateDetails
-            });
-          } catch (statusError) {
-            console.error(`   ⚠️  Could not set error status:`, statusError);
+            // Fallback: try updating records individually
+            console.log(`⚠️  Attempting individual updates...`);
+            for (const singleUpdate of updateBatch) {
+              try {
+                await base(TABLE_ID).update(singleUpdate.id, singleUpdate.fields);
+                processed++;
+                console.log(`   ✅ Individual update successful`);
+              } catch (individualError) {
+                console.error(`   ❌ Individual update failed:`, individualError);
+                
+                // Try to set Error status
+                try {
+                  const now = new Date();
+                  const timestamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+                  const errorMsg = individualError instanceof Error ? individualError.message : String(individualError);
+                  const updateDetails = `${timestamp} - Error: ${errorMsg}`;
+                  
+                  await base(TABLE_ID).update(singleUpdate.id, {
+                    'Soc ADB Status': 'Error',
+                    'ADB Updates': updateDetails
+                  });
+                } catch (statusError) {
+                  console.error(`   ⚠️  Could not set error status:`, statusError);
+                }
+                
+                skipped++;
+              }
+            }
+            updateBatch = [];
           }
-          
-          skipped++;
         }
       } else {
         skipped++;
