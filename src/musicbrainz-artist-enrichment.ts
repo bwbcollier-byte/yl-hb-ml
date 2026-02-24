@@ -23,6 +23,11 @@ const albumsBase = new Airtable({ apiKey: AIRTABLE_TOKEN }).base(ALBUMS_BASE_ID)
 // Rate limiting
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+// Batch update settings
+const BATCH_SIZE = 10;
+// Tracks fields that don't exist in Airtable - persists across all records to avoid retrying known bad fields
+const globalSkippedFields = new Set<string>();
+
 // User-Agent for MusicBrainz (required)
 const USER_AGENT = 'MusicBrainzEnrichment/1.0 (contact@example.com)';
 
@@ -351,7 +356,7 @@ function extractArtistRelationships(relations?: MusicBrainzArtist['relations']):
 /**
  * Process a single artist record
  */
-async function enrichArtist(recordId: string, mbid: string, artistName: string, existingFields: any) {
+async function enrichArtist(recordId: string, mbid: string, artistName: string, existingFields: any): Promise<{ id: string; fields: any } | null> {
   console.log(`\n📋 Processing: ${artistName}`);
   console.log(`   MBID: ${mbid}`);
 
@@ -359,7 +364,7 @@ async function enrichArtist(recordId: string, mbid: string, artistName: string, 
   const mbData = await fetchMusicBrainzArtist(mbid);
   if (!mbData) {
     console.log(`  ⚠️  Skipping - no MusicBrainz data found`);
-    return;
+    return null;
   }
 
   // Fetch TheAudioDB data (optional, may require premium key)
@@ -523,58 +528,70 @@ async function enrichArtist(recordId: string, mbid: string, artistName: string, 
     }
   }
 
-  // Update the record - retry loop to handle multiple unknown fields
-  let fieldsToUpdate = { ...updateFields };
-  let updateSuccessful = false;
-  let maxRetries = 10; // Prevent infinite loops
-  let retryCount = 0;
-  const skippedFields: string[] = [];
-  
-  while (!updateSuccessful && retryCount < maxRetries) {
-    try {
-      await base(TABLE_ID).update(recordId, fieldsToUpdate);
-      console.log(`  ✅ Updated successfully`);
-      if (skippedFields.length > 0) {
-        console.log(`     - Skipped fields: ${skippedFields.join(', ')}`);
-      }
-      console.log(`     - MusicBrainz fields: ${Object.keys(fieldsToUpdate).filter(k => k.startsWith('Soc MB') || k === 'Date Formed Born' || k === 'Date Formed Born Year' || k === 'Check Musicbrainz').length}`);
-      console.log(`     - Social URLs added: ${Object.keys(fieldsToUpdate).filter(k => k.startsWith('Soc ') && !k.startsWith('Soc MB')).length}`);
-      updateSuccessful = true;
-    } catch (error: any) {
-      // If it's an unknown field error, remove that field and retry
-      if (error.message?.includes('Unknown field name')) {
-        const fieldMatch = error.message.match(/Unknown field name: "([^"]+)"/);
-        
-        if (fieldMatch) {
-          const problematicField = fieldMatch[1];
-          skippedFields.push(problematicField);
-          delete fieldsToUpdate[problematicField];
-          retryCount++;
-        } else {
-          // Can't identify the field, give up
-          console.error(`  ❌ Error updating record:`, error.message || error);
-          break;
-        }
-      } else {
-        // Different error type, give up
-        console.error(`  ❌ Error updating record:`, error.message || error);
-        if (error.error === 'INVALID_VALUE_FOR_COLUMN') {
-          console.error(`     Fields being updated:`, Object.keys(fieldsToUpdate).join(', '));
-        }
-        break;
-      }
-    }
-  }
-  
-  if (retryCount >= maxRetries) {
-    console.error(`  ❌ Max retries exceeded - too many unknown fields`);
+  // Filter out any fields already known to be bad (from previous records in this run)
+  for (const field of globalSkippedFields) {
+    delete updateFields[field];
   }
 
-  // Enrich albums
+  // Enrich albums (still per-artist, not batched)
   await enrichAlbums(artistName, mbData['release-groups'], existingFields['Soc Spotify Artist Id'] as string);
 
   // Sleep to avoid rate limits
   await sleep(500);
+
+  return { id: recordId, fields: updateFields };
+}
+
+/**
+ * Batch update artist records - retries on unknown field errors, falls back to individual on other errors
+ */
+async function batchUpdateArtists(batch: Array<{ id: string; fields: any }>) {
+  let currentBatch = batch.map(item => ({ id: item.id, fields: { ...item.fields } }));
+  let maxRetries = 10;
+  let retryCount = 0;
+
+  while (retryCount < maxRetries) {
+    try {
+      await base(TABLE_ID).update(currentBatch);
+      const mbCount = currentBatch[0] ? Object.keys(currentBatch[0].fields).filter(k => k.startsWith('Soc MB') || k === 'Date Formed Born' || k === 'Date Formed Born Year' || k === 'Check Musicbrainz').length : 0;
+      console.log(`  ✅ Batch updated ${currentBatch.length} records (${mbCount} MB fields each)`);
+      if (globalSkippedFields.size > 0) {
+        console.log(`     - Globally skipped fields: ${[...globalSkippedFields].join(', ')}`);
+      }
+      return;
+    } catch (error: any) {
+      if (error.message?.includes('Unknown field name')) {
+        const fieldMatch = error.message.match(/Unknown field name: "([^"]+)"/);
+        if (fieldMatch) {
+          const badField = fieldMatch[1];
+          globalSkippedFields.add(badField);
+          // Remove the bad field from every record in this batch
+          currentBatch = currentBatch.map(item => {
+            const fields = { ...item.fields };
+            delete fields[badField];
+            return { id: item.id, fields };
+          });
+          retryCount++;
+        } else {
+          console.error(`  ❌ Batch update failed (unknown field, can't parse):`, error.message);
+          break;
+        }
+      } else {
+        // Not an unknown field error - fall back to individual updates
+        console.log(`  ⚠️  Batch failed, falling back to individual updates...`);
+        for (const item of currentBatch) {
+          try {
+            await base(TABLE_ID).update(item.id, item.fields);
+          } catch (individualError: any) {
+            console.error(`  ❌ Failed individual update:`, individualError.message);
+          }
+        }
+        return;
+      }
+    }
+  }
+
+  console.error(`  ❌ Batch max retries exceeded - too many unknown fields`);
 }
 
 /**
@@ -962,6 +979,8 @@ async function main() {
       .eachPage(async (records, fetchNextPage) => {
         console.log(`📄 Processing page of ${records.length} records (total so far: ${processed + skipped})...`);
 
+        const pageUpdates: Array<{ id: string; fields: any }> = [];
+
         for (const record of records) {
           const mbid = record.get('Soc Musicbrainz Id') as string;
           const artistName = record.get('Full Name') as string || record.get('Name') as string || 'Unknown Artist';
@@ -972,8 +991,20 @@ async function main() {
             continue;
           }
 
-          await enrichArtist(record.id, mbid, artistName, record.fields);
+          const updateData = await enrichArtist(record.id, mbid, artistName, record.fields);
+          if (updateData) {
+            pageUpdates.push(updateData);
+          }
           processed++;
+        }
+
+        // Batch update artist records in groups of BATCH_SIZE
+        if (pageUpdates.length > 0) {
+          console.log(`\n💾 Batching ${pageUpdates.length} artist updates (${BATCH_SIZE} per call)...`);
+          for (let i = 0; i < pageUpdates.length; i += BATCH_SIZE) {
+            const batch = pageUpdates.slice(i, i + BATCH_SIZE);
+            await batchUpdateArtists(batch);
+          }
         }
 
         fetchNextPage();
