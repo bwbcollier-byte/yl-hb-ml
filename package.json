@@ -1,11 +1,12 @@
 {
-  "name": "spotify-artist-enrichment",
+  "name": "hb-data-musicartists",
   "version": "1.0.0",
-  "description": "Enrich Airtable music artist profiles with Spotify data",
+  "description": "Consolidated music artist enrichment with Spotify, TheAudioDB, and MusicBrainz",
   "main": "dist/index.js",
   "scripts": {
     "start": "ts-node src/index.ts",
     "adb": "ts-node src/adb-artist-enrichment.ts",
+    "musicbrainz": "ts-node src/musicbrainz-artist-enrichment.ts",
     "build": "tsc",
     "dev": "ts-node src/index.ts"
   },
