@@ -35,11 +35,11 @@ jobs:
         env:
           AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
           AUDIODB_API_KEY: ${{ secrets.AUDIODB_API_KEY }}
-          AIRTABLE_BASE_ID: ${{ secrets.AIRTABLE_BASE_ID }}
-          AIRTABLE_TABLE_ID: ${{ secrets.AIRTABLE_TABLE_ID }}
-          AIRTABLE_VIEW_NAME: ${{ secrets.AIRTABLE_VIEW_NAME || 'Musicbrainz' }}
-          ALBUMS_BASE_ID: ${{ secrets.ALBUMS_BASE_ID }}
-          ALBUMS_TABLE_ID: ${{ secrets.ALBUMS_TABLE_ID }}
+          AIRTABLE_BASE_ID: appiYGWjEZVB76yyl
+          AIRTABLE_TABLE_ID: tblQ3DrCHekgRqj7Z
+          AIRTABLE_VIEW_NAME: Musicbrainz
+          ALBUMS_BASE_ID: appYXhhXgVkSblLdl
+          ALBUMS_TABLE_ID: tblYaSMImRbOr9CX3
           LIMIT: ${{ github.event.inputs.limit }}
         run: node dist/musicbrainz-artist-enrichment.js
       
