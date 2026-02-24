@@ -188,7 +188,7 @@ function extractSocialLinks(socialData: any[]): {
  */
 async function processArtist(record: any): Promise<{ id: string; fields: any } | null> {
   const recordId = record.id;
-  const artistName = record.fields['Soc Artist'] || 'Unknown';
+  const artistName = record.fields['Name'] || 'Unknown';
   const musicbrainzId = record.fields['Soc Musicbrainz Id'];
   
   console.log(`\n📋 Processing: ${artistName}`);
