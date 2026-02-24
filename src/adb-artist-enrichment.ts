@@ -47,6 +47,47 @@ async function fetchAudioDBArtist(musicbrainzId: string): Promise<any | null> {
 }
 
 /**
+ * Search for artist by name when MusicBrainz ID is missing or fails
+ */
+async function searchAudioDBArtistByName(artistName: string): Promise<any | null> {
+  const encodedName = encodeURIComponent(artistName);
+  const url = `${AUDIODB_API_BASE}/${AUDIODB_API_KEY}/search.php?s=${encodedName}`;
+  
+  try {
+    console.log(`   🔍 Searching by artist name: "${artistName}"`);
+    const response = await fetch(url);
+    if (!response.ok) {
+      console.error(`   ❌ AudioDB Search API error: ${response.status}`);
+      return null;
+    }
+    
+    const data: any = await response.json();
+    if (data.artists && data.artists.length > 0) {
+      // If multiple results, try to find exact match
+      const exactMatch = data.artists.find((artist: any) => 
+        artist.strArtist?.toLowerCase() === artistName.toLowerCase()
+      );
+      
+      if (exactMatch) {
+        console.log(`   ✅ Found exact match: ${exactMatch.strArtist}`);
+        return exactMatch;
+      }
+      
+      // If no exact match, take first result but warn
+      console.log(`   ⚠️  No exact match. Using first result: ${data.artists[0].strArtist}`);
+      console.log(`   📊 Total results: ${data.artists.length}`);
+      return data.artists[0];
+    }
+    
+    console.log(`   ⚠️  No results found for artist name search`);
+    return null;
+  } catch (error) {
+    console.error(`   ❌ Error searching AudioDB by artist name:`, error);
+    return null;
+  }
+}
+
+/**
  * Fetch social links from TheAudioDB
  */
 async function fetchAudioDBSocial(artistId: string): Promise<any[]> {
@@ -153,18 +194,27 @@ async function processArtist(record: any): Promise<{ id: string; fields: any } |
   console.log(`\n📋 Processing: ${artistName}`);
   console.log(`   MusicBrainz ID: ${musicbrainzId || 'None'}`);
   
-  if (!musicbrainzId) {
-    console.log(`   ⏭️  Skipping: No MusicBrainz ID`);
-    return null;
+  let artistData = null;
+  
+  // Try MusicBrainz ID lookup first if available
+  if (musicbrainzId) {
+    console.log(`   🔍 Fetching TheAudioDB artist data via MusicBrainz ID...`);
+    artistData = await fetchAudioDBArtist(musicbrainzId);
+    await sleep(RATE_LIMIT_DELAY);
   }
   
-  // Fetch artist data from TheAudioDB
-  console.log(`   🔍 Fetching TheAudioDB artist data...`);
-  const artistData = await fetchAudioDBArtist(musicbrainzId);
-  await sleep(RATE_LIMIT_DELAY);
+  // Fallback to name search if MusicBrainz lookup failed or no ID
+  if (!artistData) {
+    if (musicbrainzId) {
+      console.log(`   ⚠️  No AudioDB data found via MusicBrainz ID`);
+    }
+    console.log(`   🔄 Attempting fallback search by artist name...`);
+    artistData = await searchAudioDBArtistByName(artistName);
+    await sleep(RATE_LIMIT_DELAY);
+  }
   
   if (!artistData) {
-    console.log(`   ⚠️  No AudioDB data found`);
+    console.log(`   ❌ No AudioDB data found via MusicBrainz ID or name search`);
     return null;
   }
   
@@ -201,7 +251,7 @@ async function processArtist(record: any): Promise<{ id: string; fields: any } |
   // Basic Links (from main artist endpoint)
   if (artistData.strWebsite) updateFields['Soc ADB Website'] = artistData.strWebsite;
   if (artistData.strFacebook) updateFields['Soc ADB Facebook'] = artistData.strFacebook;
-  if (artistData.strTwitter) updateFields['Soc ADB Twitter'] = artistData.strTwitter;
+  // Note: Twitter field from main endpoint often returns a number (1), so we only use the social endpoint for Twitter
   
   // Biographies (all languages)
   if (artistData.strBiographyEN) updateFields['Soc ADB BiographyEN'] = artistData.strBiographyEN;
@@ -268,6 +318,7 @@ async function processArtist(record: any): Promise<{ id: string; fields: any } |
       if (socialLinks.songkick) updateFields['Soc ADB Songkick'] = socialLinks.songkick;
       if (socialLinks.beatport) updateFields['Soc ADB Beatport'] = socialLinks.beatport;
       if (socialLinks.tidal) updateFields['Soc ADB Tidal'] = socialLinks.tidal;
+      if (socialLinks.twitter) updateFields['Soc ADB Twitter'] = socialLinks.twitter;
     }
   }
   
