@@ -942,40 +942,42 @@ async function main() {
   }
   console.log('');
 
+  let processed = 0;
+  let skipped = 0;
+
   try {
-    // Fetch records from Airtable
-    console.log(`📥 Fetching records from view "${VIEW_NAME}"...`);
-    
+    console.log(`📥 Fetching records from view "${VIEW_NAME}" (paginated)...`);
+
     const selectOptions: any = {
       view: VIEW_NAME,
+      pageSize: 100,
     };
-    
+
     if (LIMIT) {
       selectOptions.maxRecords = LIMIT;
     }
-    
-    const records = await base(TABLE_ID)
+
+    await base(TABLE_ID)
       .select(selectOptions)
-      .all();
+      .eachPage(async (records, fetchNextPage) => {
+        console.log(`📄 Processing page of ${records.length} records (total so far: ${processed + skipped})...`);
 
-    console.log(`✅ Found ${records.length} records\n`);
+        for (const record of records) {
+          const mbid = record.get('Soc Musicbrainz Id') as string;
+          const artistName = record.get('Full Name') as string || record.get('Name') as string || 'Unknown Artist';
 
-    let processed = 0;
-    let skipped = 0;
+          if (!mbid) {
+            console.log(`⏭️  Skipping ${artistName} - no MusicBrainz ID`);
+            skipped++;
+            continue;
+          }
 
-    for (const record of records) {
-      const mbid = record.get('Soc Musicbrainz Id') as string;
-      const artistName = record.get('Full Name') as string || record.get('Name') as string || 'Unknown Artist';
+          await enrichArtist(record.id, mbid, artistName, record.fields);
+          processed++;
+        }
 
-      if (!mbid) {
-        console.log(`⏭️  Skipping ${artistName} - no MusicBrainz ID`);
-        skipped++;
-        continue;
-      }
-
-      await enrichArtist(record.id, mbid, artistName, record.fields);
-      processed++;
-    }
+        fetchNextPage();
+      });
 
     console.log('\n=====================================');
     console.log('✨ Enrichment Complete!');
