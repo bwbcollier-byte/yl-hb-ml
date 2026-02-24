@@ -299,11 +299,11 @@ async function main() {
     console.log('📥 Fetching records from Airtable...\n');
     
     const records: any[] = [];
+    const selectOptions: any = { view: VIEW_NAME };
+    if (LIMIT) selectOptions.maxRecords = LIMIT;
+    
     await base(TABLE_ID)
-      .select({
-        view: VIEW_NAME,
-        maxRecords: LIMIT
-      })
+      .select(selectOptions)
       .eachPage((pageRecords, fetchNextPage) => {
         records.push(...pageRecords);
         fetchNextPage();
