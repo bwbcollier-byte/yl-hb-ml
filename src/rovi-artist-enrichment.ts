@@ -5,7 +5,7 @@ import {
   getArtistsForRoviEnrichment,
   updateArtistRoviData
 } from './supabase';
-import { trackRoviStart, trackRoviEnd } from './airtable-tracker';
+import { trackRoviStart, trackRoviEnd, trackRoviProgress } from './airtable-tracker';
 
 dotenv.config();
 
@@ -165,6 +165,13 @@ async function main() {
       try {
         await enrichArtist(artist);
         processed++;
+
+        // Update progress every 100 records
+        if (processed > 0 && processed % 100 === 0) {
+          console.log(`\n📊 Bulk progress update: ${processed} records done...`);
+          await trackRoviProgress();
+        }
+
         await sleep(500); // Conservative delay
       } catch (err: any) {
         console.error(`\n❌ Error processing ${artist.name}:`, err.message);

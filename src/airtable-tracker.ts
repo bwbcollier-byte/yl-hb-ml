@@ -228,3 +228,39 @@ export async function trackRoviEnd(processed: number, errors: number) {
     'Run Details': `${completionLog}\n\n${existingDetails}`.trim()
   });
 }
+
+export async function trackSpotifyProgress() {
+  const stats = await getSpotifyStats();
+  await updateAirtable('rec7QXzhBs8piBIUd', {
+    'Records Todo': stats.todo,
+    'Records Done': stats.done,
+    'Records Total': stats.total
+  });
+}
+
+export async function trackMusicBrainzProgress() {
+  const stats = await getMusicBrainzStats();
+  await updateAirtable('recMVWfTjfuqakyIl', {
+    'Records Todo': stats.todo,
+    'Records Done': stats.done,
+    'Records Total': stats.total
+  });
+}
+
+export async function trackAudioDBProgress() {
+  const stats = await getAudioDBStats();
+  await updateAirtable('recxapUq9b9H70LaW', {
+    'Records Todo': stats.todo,
+    'Records Done': stats.done,
+    'Records Total': stats.total
+  });
+}
+
+export async function trackRoviProgress() {
+  const stats = await getRoviStats();
+  await updateAirtable('recvR5qRtVeQFc2UT', {
+    'Records Todo': stats.todo,
+    'Records Done': stats.done,
+    'Records Total': stats.total
+  });
+}

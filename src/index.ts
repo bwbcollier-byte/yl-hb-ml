@@ -1,7 +1,7 @@
 import dotenv from 'dotenv';
 import https from 'https';
 import readline from 'readline';
-import { trackSpotifyStart, trackSpotifyEnd } from './airtable-tracker';
+import { trackSpotifyStart, trackSpotifyEnd, trackSpotifyProgress } from './airtable-tracker';
 import {
   supabase,
   updateArtistSpotifyStatus,
@@ -557,6 +557,12 @@ async function main() {
       });
 
       await Promise.all(promises);
+      
+      // Update progress every 100 records
+      if (processed > 0 && processed % 100 < CONCURRENCY && processed >= 100) {
+        console.log(`\n📊 Bulk progress update: ${processed} records done...`);
+        await trackSpotifyProgress();
+      }
 
       if (i + CONCURRENCY < artists.length) {
         await sleep(1000);

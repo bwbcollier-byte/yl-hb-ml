@@ -7,7 +7,7 @@ import {
   getAlbumsByArtistId,
   updateAlbumMusicBrainzData,
 } from './supabase';
-import { trackMusicBrainzStart, trackMusicBrainzEnd } from './airtable-tracker';
+import { trackMusicBrainzStart, trackMusicBrainzEnd, trackMusicBrainzProgress } from './airtable-tracker';
 
 dotenv.config();
 
@@ -609,6 +609,12 @@ async function main() {
       try {
         await enrichArtist(artist);
         processed++;
+
+        // Update progress every 100 records
+        if (processed > 0 && processed % 100 === 0) {
+          console.log(`\n📊 Bulk progress update: ${processed} records done...`);
+          await trackMusicBrainzProgress();
+        }
       } catch (err: any) {
         console.error(`\n❌ Error processing ${artist.name}:`, err.message);
 
