@@ -3,39 +3,39 @@ name: MusicBrainz Full Enrichment
 on:
   schedule:
     # Run daily at 4 AM UTC (after Spotify at 2 AM and ADB at 3 AM)
-    - cron: '0 4 * * *'
+    - cron: "0 4 * * *"
   workflow_dispatch:
     inputs:
       limit:
-        description: 'Limit number of records (leave empty for all)'
+        description: "Limit number of records (leave empty for all)"
         required: false
-        default: ''
+        default: ""
 
 jobs:
   enrich:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
-      
+          node-version: "20"
+          cache: "npm"
+
       - name: Install dependencies
         run: npm ci
-      
+
       - name: Build TypeScript
         run: npm run build
-      
+
       - name: Run enrichment
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-          AUDIODB_API_KEY: ${{ secrets.AUDIODB_API_KEY }}
+          AIRTABLE_API_KEY: ${{ secrets.AIRTABLE_API_KEY }}
           LIMIT: ${{ github.event.inputs.limit }}
         run: |
           if [ -z "$LIMIT" ]; then
@@ -45,7 +45,7 @@ jobs:
             echo "Processing $LIMIT artists..."
             node dist/musicbrainz-artist-enrichment.js <<< "$LIMIT"
           fi
-      
+
       - name: Upload logs (on failure)
         if: failure()
         uses: actions/upload-artifact@v4
