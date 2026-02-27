@@ -59,17 +59,18 @@ export async function getArtistProfile(spotifyId: string) {
 }
 
 /**
- * Get all artists with sp_check = 'pending' for enrichment
+ * Get all artists for enrichment
  */
 export async function getPendingArtists(limit?: number) {
   try {
     console.log('⏳ Fetching artists from Supabase...');
     
-    // Minimal query - just get the first records by creation date
+    // Query without ORDER BY to avoid full table scan on large table
+    // Just get the first N artists with spotify_id
     const { data, error } = await supabase
       .from('talent_profiles')
       .select('spotify_id, name')
-      .order('created_at', { ascending: false })
+      .not('spotify_id', 'is', null)
       .limit(limit || 5);
 
     if (error) {
