@@ -74,11 +74,8 @@ export async function getPendingArtists(limit?: number) {
       .from('talent_profiles')
       .select('spotify_id, name')
       .not('spotify_id', 'is', null)
-      .is('sp_check', null);
-
-    if (limit) {
-      query = query.limit(limit);
-    }
+      .is('sp_check', null)
+      .limit(limit || 10000);
 
     const { data, error } = await query;
 
@@ -505,11 +502,8 @@ export async function getArtistsForMusicBrainzEnrichment(limit?: number) {
       .from('talent_profiles')
       .select('id, spotify_id, name, musicbrainz_id, mb_check')
       .not('musicbrainz_id', 'is', null)
-      .is('mb_check', null);
-
-    if (limit) {
-      query = query.limit(limit);
-    }
+      .is('mb_check', null)
+      .limit(limit || 10000);
 
     const { data, error } = await query;
 
@@ -591,11 +585,8 @@ export async function getArtistsForAudioDBEnrichment(limit?: number) {
       .from('talent_profiles')
       .select('id, spotify_id, name, musicbrainz_id, adb_check')
       .not('musicbrainz_id', 'is', null)
-      .is('adb_check', null);
-
-    if (limit) {
-      query = query.limit(limit);
-    }
+      .is('adb_check', null)
+      .limit(limit || 10000);
 
     const { data, error } = await query;
 
@@ -682,11 +673,8 @@ export async function getArtistsForRoviEnrichment(limit?: number) {
       .from('talent_profiles')
       .select('id, spotify_id, name, social_allmusic_id, social_apple_music_id, amg_pop_id, amg_classic_id, rovi_check')
       .or('social_allmusic_id.not.is.null,social_apple_music_id.not.is.null,amg_pop_id.not.is.null,amg_classic_id.not.is.null')
-      .is('rovi_check', null);
-
-    if (limit) {
-      query = query.limit(limit);
-    }
+      .is('rovi_check', null)
+      .limit(limit || 10000);
 
     const { data, error } = await query;
 
