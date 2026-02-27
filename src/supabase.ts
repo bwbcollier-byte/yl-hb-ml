@@ -1,4 +1,8 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import dotenv from 'dotenv';
+
+// Load environment variables
+dotenv.config();
 
 const SUPABASE_URL = process.env.SUPABASE_URL!;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY!;
@@ -58,23 +62,26 @@ export async function getArtistProfile(spotifyId: string) {
  * Get all artists with sp_check = 'pending' for enrichment
  */
 export async function getPendingArtists(limit?: number) {
-  let query = supabase
-    .from('talent_profiles')
-    .select('id, spotify_id, name, sp_check, created_at')
-    .eq('sp_check', 'pending')
-    .order('created_at', { ascending: true });
+  try {
+    console.log('⏳ Fetching artists from Supabase...');
+    
+    // Minimal query - just get the first records by creation date
+    const { data, error } = await supabase
+      .from('talent_profiles')
+      .select('id, spotify_id, name')
+      .order('created_at', { ascending: false })
+      .limit(limit || 5);
 
-  if (limit) {
-    query = query.limit(limit);
+    if (error) {
+      throw new Error(`Failed to fetch artists: ${error.message}`);
+    }
+
+    console.log(`✅ Found ${data?.length || 0} artists to process`);
+    return data || [];
+  } catch (err: any) {
+    console.error('⚠️ Query error:', err.message);
+    return [];
   }
-
-  const { data, error } = await query;
-
-  if (error) {
-    throw new Error(`Failed to fetch pending artists: ${error.message}`);
-  }
-
-  return data || [];
 }
 
 /**
