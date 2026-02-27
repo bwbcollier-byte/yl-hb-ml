@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: "0 6 * * *" # 6 AM UTC daily
   workflow_dispatch: # Allows manual trigger
+    inputs:
+      musicfetch_token:
+        description: "MusicFetch API Token (x-token)"
+        required: false
+        type: string
 
 jobs:
   enrich:
@@ -26,7 +31,7 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           AIRTABLE_API_KEY: ${{ secrets.AIRTABLE_API_KEY }}
-          MUSICFETCH_TOKEN: ${{ secrets.MUSICFETCH_TOKEN }}
+          MUSICFETCH_TOKEN: ${{ github.event.inputs.musicfetch_token || secrets.MUSICFETCH_TOKEN }}
           LIMIT: 1000 # Default daily limit for automation
           CI: true
         run: npm run musicfetch
