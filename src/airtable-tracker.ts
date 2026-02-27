@@ -55,7 +55,7 @@ export async function trackSpotifyStart() {
   
   const now = new Date();
   const timestamp = now.toLocaleString();
-  const newLog = `[${timestamp}] START: New run starting. Records Todo: ${stats.todo}`;
+  const newLog = `[${timestamp}] START:\nNew run starting for Spotify. Records Todo: ${stats.todo}`;
   
   await updateAirtable(recordId, {
     'Run Status': 'Running',
@@ -77,7 +77,7 @@ export async function trackSpotifyEnd(processed: number, errors: number) {
   
   const now = new Date();
   const timestamp = now.toLocaleString();
-  const completionLog = `[${timestamp}] FINISH: Processed ${processed} records with ${errors} errors.`;
+  const completionLog = `[${timestamp}] FINISH:\nProcessed ${processed} records with ${errors} errors for Spotify. ${stats.todo} records still to be processed.`;
   
   await updateAirtable(recordId, {
     'Run Status': 'Complete',
@@ -99,7 +99,7 @@ export async function trackMusicBrainzStart() {
   
   const now = new Date();
   const timestamp = now.toLocaleString();
-  const newLog = `[${timestamp}] START: New run starting. Records Todo: ${stats.todo}`;
+  const newLog = `[${timestamp}] START:\nNew run starting for MusicBrainz. Records Todo: ${stats.todo}`;
   
   await updateAirtable(recordId, {
     'Run Status': 'Running',
@@ -121,7 +121,7 @@ export async function trackMusicBrainzEnd(processed: number, errors: number) {
   
   const now = new Date();
   const timestamp = now.toLocaleString();
-  const completionLog = `[${timestamp}] FINISH: Processed ${processed} records with ${errors} errors.`;
+  const completionLog = `[${timestamp}] FINISH:\nProcessed ${processed} records with ${errors} errors for MusicBrainz. ${stats.todo} records still to be processed.`;
   
   await updateAirtable(recordId, {
     'Run Status': 'Complete',
