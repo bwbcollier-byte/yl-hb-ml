@@ -37,7 +37,14 @@ jobs:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           AUDIODB_API_KEY: ${{ secrets.AUDIODB_API_KEY }}
           LIMIT: ${{ github.event.inputs.limit }}
-        run: node dist/musicbrainz-artist-enrichment.js
+        run: |
+          if [ -z "$LIMIT" ]; then
+            echo "Processing all pending artists..."
+            node dist/musicbrainz-artist-enrichment.js <<< ""
+          else
+            echo "Processing $LIMIT artists..."
+            node dist/musicbrainz-artist-enrichment.js <<< "$LIMIT"
+          fi
       
       - name: Upload logs (on failure)
         if: failure()

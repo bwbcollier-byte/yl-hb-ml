@@ -20,8 +20,9 @@ const ENV_LIMIT = process.env.LIMIT ? parseInt(process.env.LIMIT) : undefined;
  */
 function promptForLimit(): Promise<number | undefined> {
   return new Promise((resolve) => {
-    if (ENV_LIMIT) {
-      console.log(`\n🔢 Using LIMIT from environment: ${ENV_LIMIT}`);
+    if (ENV_LIMIT || process.env.CI) {
+      if (ENV_LIMIT) console.log(`\n🔢 Using LIMIT from environment: ${ENV_LIMIT}`);
+      else console.log(`\n🤖 CI Environment detected, skipping interactive prompt.`);
       resolve(ENV_LIMIT);
       return;
     }

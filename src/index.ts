@@ -54,10 +54,10 @@ async function getNextRapidAPIKey(): Promise<string> {
     await sleep(10);
   }
   keyRotationLock = true;
-  
+
   const key = RAPIDAPI_KEYS[currentKeyIndex];
   currentKeyIndex = (currentKeyIndex + 1) % RAPIDAPI_KEYS.length;
-  
+
   keyRotationLock = false;
   return key;
 }
@@ -68,10 +68,10 @@ async function getNextRapidAPIKey(): Promise<string> {
 async function fetchSpotifyArtist(artistId: string, retries = 3): Promise<any> {
   for (let attempt = 1; attempt <= retries; attempt++) {
     const apiKey = await getNextRapidAPIKey();
-    
+
     try {
       const requestBody = JSON.stringify({ id: artistId });
-      
+
       const options = {
         hostname: 'spotify-api25.p.rapidapi.com',
         port: 443,
@@ -84,7 +84,7 @@ async function fetchSpotifyArtist(artistId: string, retries = 3): Promise<any> {
           'Content-Length': Buffer.byteLength(requestBody),
         },
       };
-      
+
       return await new Promise((resolve, reject) => {
         const req = https.request(options, (res) => {
           let data = '';
@@ -97,7 +97,7 @@ async function fetchSpotifyArtist(artistId: string, retries = 3): Promise<any> {
             }
           });
         });
-        
+
         req.on('error', reject);
         req.write(requestBody);
         req.end();
@@ -114,19 +114,19 @@ async function fetchSpotifyArtist(artistId: string, retries = 3): Promise<any> {
  */
 function extractGenres(artist: any): string {
   const biography = artist.profile?.biography?.text || '';
-  
+
   const genreKeywords = [
     'R&B', 'R&amp;B', 'Pop', 'Hip-Hop', 'Hip Hop', 'Rap', 'Soul', 'Funk', 'Electronic',
     'Alternative', 'Indie', 'Rock', 'Jazz', 'Blues', 'Country', 'Dance', 'House', 'Techno'
   ];
-  
+
   const foundGenres: string[] = [];
   for (const genre of genreKeywords) {
     if (biography.includes(genre) && !foundGenres.includes(genre.replace('&amp;', '&'))) {
       foundGenres.push(genre.replace('&amp;', '&'));
     }
   }
-  
+
   return foundGenres.slice(0, 5).join(', ');
 }
 
@@ -138,12 +138,12 @@ async function processAlbums(discography: any, artistId: string, artistName: str
   // Flatten the nested releases structure
   const albumGroups = discography?.albums?.items || [];
   const flattenedAlbums: any[] = [];
-  
+
   for (const group of albumGroups) {
     const releases = group.releases?.items || [];
     flattenedAlbums.push(...releases);
   }
-  
+
   if (flattenedAlbums.length === 0) {
     console.log(`   📀 No albums found`);
     return;
@@ -212,7 +212,7 @@ async function processRelatedArtists(relatedContent: any, parentArtistId: string
       const spotifyId = artist.id;
       const artistName = artist.profile?.name || artist.name || '';
       const avatarUrl = artist.visuals?.avatarImage?.sources?.[0]?.url || '';
-      
+
       const existing = await getRelatedArtistBySpotifyId(spotifyId);
 
       if (existing) {
@@ -231,7 +231,7 @@ async function processRelatedArtists(relatedContent: any, parentArtistId: string
         await createRelatedArtist(artistData);
         created++;
       }
-      
+
       relatedIds.push(spotifyId);
       relatedNames.push(artistName);
     } catch (error) {
@@ -290,7 +290,7 @@ async function processConcerts(goods: any, artistId: string, artistName: string,
       const venue = concert.venue || {};
       const coordinates = venue.coordinates || {};
       const dateStr = concert.date?.isoString || concert.date;
-      
+
       // Collect artist info from concert
       const concertArtists = concert.artists?.items || [];
       const artistUrls = concertArtists.map((a: any) => a.uri).join(',');
@@ -345,7 +345,7 @@ async function enrichArtistFromSpotify(spotifyId: string, artistName: string) {
 
     // Response structure: { data: { artistUnion: { ... } } }
     const artistData = response.data?.artistUnion;
-    
+
     if (!artistData || !artistData.profile) {
       console.log(`❌ Artist not found on Spotify`);
       await updateArtistSpotifyStatus(spotifyId, 'completed', { sp_data_status: 'Not Found' });
@@ -356,7 +356,7 @@ async function enrichArtistFromSpotify(spotifyId: string, artistName: string) {
     const stats = artist.stats || {};
     const relatedArtists = artist.relatedContent?.relatedArtists?.items || [];
     const topCities = stats.topCities?.items || [];
-    
+
     // Extract counts
     const concertsCount = artist.goods?.events?.concerts?.totalCount || 0;
     const popularReleasesAlbumsCount = artist.discography?.popularReleasesAlbums?.totalCount || 0;
@@ -365,7 +365,7 @@ async function enrichArtistFromSpotify(spotifyId: string, artistName: string) {
     const albumsCount = artist.discography?.albums?.totalCount || 0;
 
     console.log(`🎤 Concerts: ${concertsCount}, Albums: ${albumsCount}, Singles: ${singlesCount}`);
-    
+
     // Extract images
     const galleryImages = artist.visuals?.gallery?.items || [];
     const largeImages = galleryImages
@@ -446,13 +446,13 @@ async function enrichArtistFromSpotify(spotifyId: string, artistName: string) {
 
     // Process related data (albums, related artists, concerts)
     console.log(`\n   Processing additional data...`);
-    
+
     // Process albums
     await processAlbums(artistData.discography, spotifyId, artistName, talentProfileId);
-    
+
     // Process related artists
     await processRelatedArtists(artistData.relatedContent, spotifyId, artistName);
-    
+
     // Process concerts
     await processConcerts(artistData.goods, spotifyId, artistName, talentProfileId, artistImage);
 
@@ -471,8 +471,9 @@ async function enrichArtistFromSpotify(spotifyId: string, artistName: string) {
 function promptForLimit(): Promise<number | undefined> {
   return new Promise((resolve) => {
     // If LIMIT is already set via environment, use it
-    if (LIMIT) {
-      console.log(`\n🔢 Using LIMIT from environment: ${LIMIT}`);
+    if (LIMIT || process.env.CI) {
+      if (LIMIT) console.log(`\n🔢 Using LIMIT from environment: ${LIMIT}`);
+      else console.log(`\n🤖 CI Environment detected, skipping interactive prompt.`);
       resolve(LIMIT);
       return;
     }
@@ -484,7 +485,7 @@ function promptForLimit(): Promise<number | undefined> {
 
     rl.question('\n🔢 How many artists to process? (press Enter for all): ', (answer) => {
       rl.close();
-      
+
       if (!answer || answer.trim() === '') {
         console.log('Processing all pending artists...');
         resolve(undefined);
@@ -515,7 +516,7 @@ async function main() {
 
   try {
     let artists = await getPendingArtists(effectiveLimit);
-    
+
     // Fallback to test data if database query fails
     if (!artists || artists.length === 0) {
       console.log('⚠️  Database query failed or empty, using test data\n');
@@ -525,7 +526,7 @@ async function main() {
       ];
       if (effectiveLimit) artists = artists.slice(0, effectiveLimit);
     }
-    
+
     console.log(`📋 Found ${artists.length} pending artists to process\n`);
 
     let processed = 0;
@@ -535,7 +536,7 @@ async function main() {
     for (let i = 0; i < artists.length; i += CONCURRENCY) {
       const batch = artists.slice(i, i + CONCURRENCY);
       console.log(`\n🔄 Batch ${Math.floor(i / CONCURRENCY) + 1}/${Math.ceil(artists.length / CONCURRENCY)} (${batch.length} artists)\n`);
-      
+
       const promises = batch.map(async (artist) => {
         const spotifyId = artist.spotify_id as string;
         const artistName = artist.name || 'Unknown Artist';
@@ -554,9 +555,9 @@ async function main() {
           errors++;
         }
       });
-      
+
       await Promise.all(promises);
-      
+
       if (i + CONCURRENCY < artists.length) {
         await sleep(1000);
       }
