@@ -538,12 +538,12 @@ export async function updateArtistMusicBrainzData(
 export async function getMusicBrainzStats() {
   const { count: total } = await supabase
     .from('talent_profiles')
-    .select('*', { count: 'exact', head: true })
+    .select('id', { count: 'exact', head: true })
     .not('musicbrainz_id', 'is', null);
 
   const { count: todo } = await supabase
     .from('talent_profiles')
-    .select('*', { count: 'exact', head: true })
+    .select('id', { count: 'exact', head: true })
     .not('musicbrainz_id', 'is', null)
     .is('mb_check', null);
 
