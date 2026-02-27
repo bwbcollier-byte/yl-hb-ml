@@ -519,12 +519,8 @@ async function main() {
 
     // Fallback to test data if database query fails
     if (!artists || artists.length === 0) {
-      console.log('⚠️  Database query failed or empty, using test data\n');
-      artists = [
-        { id: 'test-1', spotify_id: '1Xyo4u8uXC1ZmMpatF05PJ', name: 'The Weeknd' },
-        { id: 'test-2', spotify_id: '3TVXtAsR1Inumichuu2iiC', name: 'Drake' },
-      ];
-      if (effectiveLimit) artists = artists.slice(0, effectiveLimit);
+      console.log('No artists to process. All caught up! ✅');
+      return;
     }
 
     console.log(`📋 Found ${artists.length} pending artists to process\n`);

@@ -64,19 +64,29 @@ export async function getArtistProfile(spotifyId: string) {
 
 /**
  * Get all artists for Spotify enrichment
+ * Filters for artists that have not been processed yet (sp_check IS NULL)
  */
 export async function getPendingArtists(limit?: number) {
   try {
-    console.log('⏳ Fetching artists from Supabase...');
+    console.log('⏳ Fetching artists for Spotify enrichment from Supabase...');
 
-    const { data, error } = await supabase
+    let query = supabase
       .from('talent_profiles')
       .select('spotify_id, name')
       .not('spotify_id', 'is', null)
-      .limit(limit || 5);
+      .is('sp_check', null);
+
+    if (limit) {
+      query = query.limit(limit);
+    } else {
+      // Default safety limit if not specified, but much larger than 5
+      query = query.limit(1000);
+    }
+
+    const { data, error } = await query;
 
     if (error) {
-      throw new Error(`Failed to fetch artists: ${error.message}`);
+      throw new Error(`Failed to fetch pending artists: ${error.message}`);
     }
 
     const artists = data?.map(row => ({
@@ -85,7 +95,7 @@ export async function getPendingArtists(limit?: number) {
       name: row.name,
     })) || [];
 
-    console.log(`✅ Found ${artists.length} artists to process`);
+    console.log(`✅ Found ${artists.length} pending artists to process`);
     return artists;
   } catch (err: any) {
     console.error('⚠️ Query error:', err.message);
