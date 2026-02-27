@@ -201,24 +201,16 @@ export async function updateArtistConcertCount(spotifyId: string, count: string 
  * Get stats for Spotify enrichment progress
  */
 export async function getSpotifyStats() {
-  const { count: total, error: totalError } = await supabase
+  const { count: total } = await supabase
     .from('talent_profiles')
     .select('*', { count: 'exact', head: true })
     .not('spotify_id', 'is', null);
 
-  if (totalError) {
-    console.error('⚠️ Failed to fetch total Spotify count:', totalError.message);
-  }
-
-  const { count: todo, error: todoError } = await supabase
+  const { count: todo } = await supabase
     .from('talent_profiles')
     .select('*', { count: 'exact', head: true })
     .not('spotify_id', 'is', null)
     .is('sp_check', null);
-
-  if (todoError) {
-    console.error('⚠️ Failed to fetch todo Spotify count:', todoError.message);
-  }
 
   const done = (total || 0) - (todo || 0);
 
@@ -544,24 +536,16 @@ export async function updateArtistMusicBrainzData(
  * Get stats for MusicBrainz enrichment progress
  */
 export async function getMusicBrainzStats() {
-  const { count: total, error: totalError } = await supabase
+  const { count: total } = await supabase
     .from('talent_profiles')
     .select('*', { count: 'exact', head: true })
     .not('musicbrainz_id', 'is', null);
 
-  if (totalError) {
-    console.error('⚠️ Failed to fetch total MusicBrainz count:', totalError.message);
-  }
-
-  const { count: todo, error: todoError } = await supabase
+  const { count: todo } = await supabase
     .from('talent_profiles')
     .select('*', { count: 'exact', head: true })
     .not('musicbrainz_id', 'is', null)
     .is('mb_check', null);
-
-  if (todoError) {
-    console.error('⚠️ Failed to fetch todo MusicBrainz count:', todoError.message);
-  }
 
   const done = (total || 0) - (todo || 0);
 
