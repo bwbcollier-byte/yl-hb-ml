@@ -83,18 +83,26 @@ function buildRoviUrl(artist: any) {
  */
 function mapRoviData(hit: any) {
   const bio = hit.musicBio?.biography?.[0]?.text || '';
+  const bioAuthor = hit.musicBio?.biography?.[0]?.author || '';
   const headline = hit.musicBio?.headlineBio || '';
+  const genres = hit.musicGenres ? hit.musicGenres.map((g: any) => g.name).join(', ') : null;
   
   return {
     rovi_id: hit.id,
     rovi_headline: headline,
     rovi_bio: bio,
+    rovi_bio_author: bioAuthor,
     rovi_birth_place: hit.birth?.place || null,
     rovi_birth_date: hit.birth?.date || null,
     rovi_active_years: hit.active ? hit.active.join(', ') : null,
     rovi_type: hit.type || null,
+    rovi_gender: hit.gender || null,
+    rovi_country: hit.country || null,
+    rovi_genres: genres,
     rovi_album_count: hit.albumCount || null,
     rovi_release_count: hit.releaseCount || null,
+    rovi_composed_track_count: hit.composedTrackCount || null,
+    rovi_performed_track_count: hit.performedTrackCount || null,
     rovi_image: hit.images?.[0]?.url || null,
     rovi_check: 'completed'
   };
