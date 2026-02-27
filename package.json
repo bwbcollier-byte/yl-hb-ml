@@ -10,10 +10,15 @@
     "build": "tsc",
     "dev": "ts-node src/index.ts"
   },
-  "keywords": ["spotify", "airtable", "enrichment"],
+  "keywords": [
+    "spotify",
+    "airtable",
+    "enrichment"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@supabase/supabase-js": "^2.98.0",
     "airtable": "^0.12.2",
     "dotenv": "^16.4.1",
     "node-fetch": "^2.7.0"
