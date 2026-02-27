@@ -57,6 +57,8 @@ export async function trackSpotifyStart() {
   const timestamp = now.toLocaleString();
   const newLog = `[${timestamp}] START:\nNew run starting for Spotify. Records Todo: ${stats.todo}`;
   
+  console.log(`📝 Log entry:\n${newLog}`);
+
   await updateAirtable(recordId, {
     'Run Status': 'Running',
     'Last Run': now.toISOString(),
@@ -101,6 +103,8 @@ export async function trackMusicBrainzStart() {
   const timestamp = now.toLocaleString();
   const newLog = `[${timestamp}] START:\nNew run starting for MusicBrainz. Records Todo: ${stats.todo}`;
   
+  console.log(`📝 Log entry:\n${newLog}`);
+
   await updateAirtable(recordId, {
     'Run Status': 'Running',
     'Last Run': now.toISOString(),
