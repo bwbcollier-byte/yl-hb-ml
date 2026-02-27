@@ -518,64 +518,77 @@ async function main() {
   // Track start in Airtable
   await trackSpotifyStart();
 
+  let totalProcessed = 0;
+  let totalSkipped = 0;
+  let totalErrors = 0;
+
   try {
-    let artists = await getPendingArtists(effectiveLimit);
+    console.log(effectiveLimit ? `🚀 Target: ${effectiveLimit} artists` : '🚀 Target: All pending artists');
 
-    // Fallback to test data if database query fails
-    if (!artists || artists.length === 0) {
-      console.log('No artists to process. All caught up! ✅');
-      return;
-    }
+    while (true) {
+      // Fetch in batches of 1000 (Supabase default limit)
+      const remainingLimit = effectiveLimit ? effectiveLimit - totalProcessed : 1000;
+      if (effectiveLimit && remainingLimit <= 0) break;
 
-    console.log(`📋 Found ${artists.length} pending artists to process\n`);
+      const batchFetchLimit = effectiveLimit ? Math.min(remainingLimit, 1000) : 1000;
+      const artists = await getPendingArtists(batchFetchLimit);
 
-    let processed = 0;
-    let skipped = 0;
-    let errors = 0;
-
-    for (let i = 0; i < artists.length; i += CONCURRENCY) {
-      const batch = artists.slice(i, i + CONCURRENCY);
-      console.log(`\n🔄 Batch ${Math.floor(i / CONCURRENCY) + 1}/${Math.ceil(artists.length / CONCURRENCY)} (${batch.length} artists)\n`);
-
-      const promises = batch.map(async (artist) => {
-        const spotifyId = artist.spotify_id as string;
-        const artistName = artist.name || 'Unknown Artist';
-
-        if (!spotifyId) {
-          console.log(`⏭️  Skipping ${artistName}: No Spotify ID`);
-          skipped++;
-          return;
-        }
-
-        try {
-          await enrichArtistFromSpotify(spotifyId, artistName);
-          processed++;
-        } catch (error) {
-          console.error(`Error enriching ${artistName}:`, error);
-          errors++;
-        }
-      });
-
-      await Promise.all(promises);
-      
-      // Update progress every 100 records
-      if (processed > 0 && processed % 100 < CONCURRENCY && processed >= 100) {
-        console.log(`\n📊 Bulk progress update: ${processed} records done...`);
-        await trackSpotifyProgress();
+      if (!artists || artists.length === 0) {
+        if (totalProcessed === 0) console.log('No artists to process. All caught up! ✅');
+        else console.log('\n✅ No more artists found to process.');
+        break;
       }
 
-      if (i + CONCURRENCY < artists.length) {
-        await sleep(1000);
+      console.log(`\n📦 Fetching next batch of ${artists.length} artists...`);
+
+      for (let i = 0; i < artists.length; i += CONCURRENCY) {
+        const batch = artists.slice(i, i + CONCURRENCY);
+        console.log(`\n🔄 Processing sub-batch ${Math.floor(i / CONCURRENCY) + 1}/${Math.ceil(artists.length / CONCURRENCY)} (${batch.length} artists)\n`);
+
+        const promises = batch.map(async (artist) => {
+          const spotifyId = artist.spotify_id as string;
+          const artistName = artist.name || 'Unknown Artist';
+
+          if (!spotifyId) {
+            console.log(`⏭️  Skipping ${artistName}: No Spotify ID`);
+            totalSkipped++;
+            return;
+          }
+
+          try {
+            await enrichArtistFromSpotify(spotifyId, artistName);
+            totalProcessed++;
+            
+            // Update progress every 100 records
+            if (totalProcessed > 0 && totalProcessed % 100 === 0) {
+              console.log(`\n📊 Bulk progress update: ${totalProcessed} records done...`);
+              await trackSpotifyProgress();
+            }
+          } catch (error) {
+            console.error(`Error enriching ${artistName}:`, error);
+            totalErrors++;
+          }
+        });
+
+        await Promise.all(promises);
+
+        if (effectiveLimit && totalProcessed >= effectiveLimit) break;
+
+        if (i + CONCURRENCY < artists.length) {
+          await sleep(1000);
+        }
       }
+
+      if (effectiveLimit && totalProcessed >= effectiveLimit) break;
     }
 
     console.log('\n✅ Processing Complete!');
-    console.log(`   Processed: ${processed}`);
-    console.log(`   Skipped: ${skipped}`);
-    console.log(`   Errors: ${errors}`);
+    console.log(`   Processed: ${totalProcessed}`);
+    console.log(`   Skipped: ${totalSkipped}`);
+    console.log(`   Errors: ${totalErrors}`);
 
     // Track end in Airtable
-    await trackSpotifyEnd(processed, errors);
+    await trackSpotifyEnd(totalProcessed, totalErrors);
 
 
   } catch (error: any) {

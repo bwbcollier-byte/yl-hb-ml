@@ -585,59 +585,73 @@ async function main() {
   const limit = await promptForLimit();
 
 
-  let processed = 0;
-  let skipped = 0;
-  let errors = 0;
+  let totalProcessed = 0;
+  let totalSkipped = 0;
+  let totalErrors = 0;
 
   try {
-    const artists = await getArtistsForMusicBrainzEnrichment(limit);
+    console.log(limit ? `🚀 Target: ${limit} artists` : '🚀 Target: All pending artists');
 
-    if (artists.length === 0) {
-      console.log('No artists to process. All caught up! ✅');
-      return;
-    }
+    while (true) {
+      // Fetch in batches of 1000 (Supabase default limit)
+      const remainingLimit = limit ? limit - totalProcessed : 1000;
+      if (limit && remainingLimit <= 0) break;
 
-    console.log(`\n📋 Processing ${artists.length} artist(s)...\n`);
+      const batchLimit = limit ? Math.min(remainingLimit, 1000) : 1000;
+      const artists = await getArtistsForMusicBrainzEnrichment(batchLimit);
 
-    for (const artist of artists) {
-      if (!artist.musicbrainz_id) {
-        console.log(`⏭️  Skipping ${artist.name} — no MusicBrainz ID`);
-        skipped++;
-        continue;
+      if (artists.length === 0) {
+        if (totalProcessed === 0) console.log('No artists to process. All caught up! ✅');
+        else console.log('\n✅ No more artists found to process.');
+        break;
       }
 
-      try {
-        await enrichArtist(artist);
-        processed++;
+      console.log(`\n📦 Fetching next batch of ${artists.length} artists...`);
 
-        // Update progress every 100 records
-        if (processed > 0 && processed % 100 === 0) {
-          console.log(`\n📊 Bulk progress update: ${processed} records done...`);
-          await trackMusicBrainzProgress();
+      for (const artist of artists) {
+        if (!artist.musicbrainz_id) {
+          console.log(`⏭️  Skipping ${artist.name} — no MusicBrainz ID`);
+          totalSkipped++;
+          continue;
         }
-      } catch (err: any) {
-        console.error(`\n❌ Error processing ${artist.name}:`, err.message);
 
-        // Best-effort error status write
         try {
-          await updateArtistMusicBrainzData(artist.spotify_id, {
-            mb_check: `ERROR: ${err.message}`,
-          });
-        } catch (_) { }
+          await enrichArtist(artist);
+          totalProcessed++;
 
-        errors++;
+          // Update progress every 100 records
+          if (totalProcessed > 0 && totalProcessed % 100 === 0) {
+            console.log(`\n📊 Bulk progress update: ${totalProcessed} records done...`);
+            await trackMusicBrainzProgress();
+          }
+
+          if (limit && totalProcessed >= limit) break;
+        } catch (err: any) {
+          console.error(`\n❌ Error processing ${artist.name}:`, err.message);
+
+          // Best-effort error status write
+          try {
+            await updateArtistMusicBrainzData(artist.spotify_id, {
+              mb_check: `ERROR: ${err.message}`,
+            });
+          } catch (_) { }
+
+          totalErrors++;
+        }
       }
+
+      if (limit && totalProcessed >= limit) break;
     }
 
     console.log('\n==================================================');
     console.log('✨ MusicBrainz Enrichment Complete!');
-    console.log(`✅ Processed: ${processed}`);
-    console.log(`⏭️  Skipped:   ${skipped}`);
-    console.log(`❌ Errors:    ${errors}`);
+    console.log(`✅ Processed: ${totalProcessed}`);
+    console.log(`⏭️  Skipped:   ${totalSkipped}`);
+    console.log(`❌ Errors:    ${totalErrors}`);
     console.log('==================================================\n');
 
     // Track end in Airtable
-    await trackMusicBrainzEnd(processed, errors);
+    await trackMusicBrainzEnd(totalProcessed, totalErrors);
 
 
   } catch (error) {

@@ -148,44 +148,58 @@ async function main() {
   await trackRoviStart();
   const limit = await promptForLimit();
 
-  let processed = 0;
-  let errors = 0;
+  let totalProcessed = 0;
+  let totalErrors = 0;
 
   try {
-    const artists = await getArtistsForRoviEnrichment(limit);
+    console.log(limit ? `🚀 Target: ${limit} artists` : '🚀 Target: All pending artists');
 
-    if (artists.length === 0) {
-      console.log('No artists to process. All caught up! ✅');
-      return;
-    }
+    while (true) {
+      // Fetch in batches of 1000 (Supabase default limit)
+      const remainingLimit = limit ? limit - totalProcessed : 1000;
+      if (limit && remainingLimit <= 0) break;
 
-    console.log(`\n📋 Processing ${artists.length} artist(s)...\n`);
+      const batchLimit = limit ? Math.min(remainingLimit, 1000) : 1000;
+      const artists = await getArtistsForRoviEnrichment(batchLimit);
 
-    for (const artist of artists) {
-      try {
-        await enrichArtist(artist);
-        processed++;
-
-        // Update progress every 100 records
-        if (processed > 0 && processed % 100 === 0) {
-          console.log(`\n📊 Bulk progress update: ${processed} records done...`);
-          await trackRoviProgress();
-        }
-
-        await sleep(500); // Conservative delay
-      } catch (err: any) {
-        console.error(`\n❌ Error processing ${artist.name}:`, err.message);
-        errors++;
+      if (artists.length === 0) {
+        if (totalProcessed === 0) console.log('No artists to process. All caught up! ✅');
+        else console.log('\n✅ No more artists found to process.');
+        break;
       }
+
+      console.log(`\n📦 Fetching next batch of ${artists.length} artists...`);
+
+      for (const artist of artists) {
+        try {
+          await enrichArtist(artist);
+          totalProcessed++;
+
+          // Update progress every 100 records
+          if (totalProcessed > 0 && totalProcessed % 100 === 0) {
+            console.log(`\n📊 Bulk progress update: ${totalProcessed} records done...`);
+            await trackRoviProgress();
+          }
+
+          if (limit && totalProcessed >= limit) break;
+
+          await sleep(500); // Conservative delay
+        } catch (err: any) {
+          console.error(`\n❌ Error processing ${artist.name}:`, err.message);
+          totalErrors++;
+        }
+      }
+
+      if (limit && totalProcessed >= limit) break;
     }
 
     console.log('\n==============================');
     console.log('✨ Rovi Enrichment Complete!');
-    console.log(`✅ Processed: ${processed}`);
-    console.log(`❌ Errors:    ${errors}`);
+    console.log(`✅ Processed: ${totalProcessed}`);
+    console.log(`❌ Errors:    ${totalErrors}`);
     console.log('==============================\n');
 
-    await trackRoviEnd(processed, errors);
+    await trackRoviEnd(totalProcessed, totalErrors);
 
   } catch (error) {
     console.error('❌ Fatal error:', error);
