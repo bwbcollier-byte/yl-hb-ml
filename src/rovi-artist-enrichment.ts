@@ -86,6 +86,7 @@ function mapRoviData(hit: any) {
   const bioAuthor = hit.musicBio?.biography?.[0]?.author || '';
   const headline = hit.musicBio?.headlineBio || '';
   const genres = hit.musicGenres ? hit.musicGenres.map((g: any) => g.name).join(', ') : null;
+  const gallery = hit.images ? hit.images.map((img: any) => img.url).join(', ') : null;
   
   return {
     rovi_id: hit.id,
@@ -94,7 +95,7 @@ function mapRoviData(hit: any) {
     rovi_bio_author: bioAuthor,
     rovi_birth_place: hit.birth?.place || null,
     rovi_birth_date: hit.birth?.date || null,
-    rovi_active_years: hit.active ? hit.active.join(', ') : null,
+    rovi_active: hit.active ? hit.active.join(', ') : null,
     rovi_type: hit.type || null,
     rovi_gender: hit.gender || null,
     rovi_country: hit.country || null,
@@ -104,6 +105,7 @@ function mapRoviData(hit: any) {
     rovi_composed_track_count: hit.composedTrackCount || null,
     rovi_performed_track_count: hit.performedTrackCount || null,
     rovi_image: hit.images?.[0]?.url || null,
+    rovi_gallery: gallery,
     rovi_check: 'completed'
   };
 }
