@@ -631,3 +631,83 @@ export async function getAudioDBStats() {
   return { todo: todo || 0, done, total: total || 0 };
 }
 
+// ============================================================================
+// ROVI/TIVO FUNCTIONS
+// ============================================================================
+
+/**
+ * Get artists that need Rovi enrichment:
+ * - Must have social_allmusic_id or social_apple_music_id or amg_pop_id or amg_classic_id
+ * - rovi_check is null (never processed)
+ */
+export async function getArtistsForRoviEnrichment(limit?: number) {
+  try {
+    console.log('⏳ Fetching artists for Rovi enrichment from Supabase...');
+
+    // We search for any artist that has at least one identifier but hasn't been checked
+    let query = supabase
+      .from('talent_profiles')
+      .select('id, spotify_id, name, social_allmusic_id, social_apple_music_id, amg_pop_id, amg_classic_id, rovi_check')
+      .or('social_allmusic_id.not.is.null,social_apple_music_id.not.is.null,amg_pop_id.not.is.null,amg_classic_id.not.is.null')
+      .is('rovi_check', null);
+
+    if (limit) {
+      query = query.limit(limit);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      throw new Error(`Failed to fetch artists for Rovi: ${error.message}`);
+    }
+
+    console.log(`✅ Found ${data?.length || 0} artists to Rovi-enrich`);
+    return data || [];
+  } catch (err: any) {
+    console.error('⚠️ Rovi query error:', err.message);
+    return [];
+  }
+}
+
+/**
+ * Update a talent_profiles row with Rovi enrichment data
+ */
+export async function updateArtistRoviData(
+  spotifyId: string,
+  roviFields: Record<string, any>
+) {
+  const { data, error } = await supabase
+    .from('talent_profiles')
+    .update({
+      ...roviFields,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('spotify_id', spotifyId);
+
+  if (error) {
+    throw new Error(`Failed to update artist Rovi data: ${error.message}`);
+  }
+
+  return data;
+}
+
+/**
+ * Get stats for Rovi enrichment progress
+ */
+export async function getRoviStats() {
+  const { count: total } = await supabase
+    .from('talent_profiles')
+    .select('id', { count: 'exact', head: true })
+    .or('social_allmusic_id.not.is.null,social_apple_music_id.not.is.null,amg_pop_id.not.is.null,amg_classic_id.not.is.null');
+
+  const { count: todo } = await supabase
+    .from('talent_profiles')
+    .select('id', { count: 'exact', head: true })
+    .or('social_allmusic_id.not.is.null,social_apple_music_id.not.is.null,amg_pop_id.not.is.null,amg_classic_id.not.is.null')
+    .is('rovi_check', null);
+
+  const done = (total || 0) - (todo || 0);
+
+  return { todo: todo || 0, done, total: total || 0 };
+}
+
