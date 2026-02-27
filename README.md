@@ -191,11 +191,25 @@ Set in repository Settings → Secrets → Actions:
 npm run build
 ```
 
-### Test with Limit
+### Run with Interactive Prompt
 ```bash
-export LIMIT=5
 npm start
 ```
+When you run the script, you'll be prompted to enter the number of artists to process:
+```
+🎵 Spotify Artist Enrichment Started
+🔑 Using RapidAPI with key rotation (11 keys)
+⚡ Parallel processing: 5 artists at a time
+
+🔢 How many artists to process? (press Enter for all): 10
+Processing 10 artists...
+```
+
+### Run with Environment Variable (Non-Interactive)
+```bash
+LIMIT=5 npm start
+```
+Skip the prompt and process exactly 5 artists.
 
 ### Local Testing
 The `.env` file allows you to test locally before deploying to GitHub Actions.
