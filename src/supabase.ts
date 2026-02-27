@@ -78,9 +78,6 @@ export async function getPendingArtists(limit?: number) {
 
     if (limit) {
       query = query.limit(limit);
-    } else {
-      // Default safety limit if not specified, but much larger than 5
-      query = query.limit(1000);
     }
 
     const { data, error } = await query;
