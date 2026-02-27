@@ -68,7 +68,7 @@ export async function getPendingArtists(limit?: number) {
     // Minimal query - just get the first records by creation date
     const { data, error } = await supabase
       .from('talent_profiles')
-      .select('id, spotify_id, name')
+      .select('spotify_id, name')
       .order('created_at', { ascending: false })
       .limit(limit || 5);
 
@@ -76,8 +76,15 @@ export async function getPendingArtists(limit?: number) {
       throw new Error(`Failed to fetch artists: ${error.message}`);
     }
 
-    console.log(`✅ Found ${data?.length || 0} artists to process`);
-    return data || [];
+    // Transform to use spotify_id as id
+    const artists = data?.map(row => ({
+      id: row.spotify_id,
+      spotify_id: row.spotify_id,
+      name: row.name,
+    })) || [];
+
+    console.log(`✅ Found ${artists.length} artists to process`);
+    return artists;
   } catch (err: any) {
     console.error('⚠️ Query error:', err.message);
     return [];

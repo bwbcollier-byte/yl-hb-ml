@@ -102,8 +102,8 @@ async function fetchSpotifyArtist(artistId: string, retries = 3): Promise<any> {
 /**
  * Extract genres from artist data
  */
-function extractGenres(artistData: any): string {
-  const biography = artistData.artistUnion?.profile?.biography?.text || '';
+function extractGenres(artist: any): string {
+  const biography = artist.profile?.biography?.text || '';
   
   const genreKeywords = [
     'R&B', 'R&amp;B', 'Pop', 'Hip-Hop', 'Hip Hop', 'Rap', 'Soul', 'Funk', 'Electronic',
@@ -128,16 +128,19 @@ async function enrichArtistFromSpotify(spotifyId: string, artistName: string) {
 
   try {
     console.log(`   🔍 Fetching artist data from Spotify...`);
-    const artistData = await fetchSpotifyArtist(spotifyId);
+    const response = await fetchSpotifyArtist(spotifyId);
     console.log(`   ✅ Received artist data`);
 
-    if (!artistData || !artistData.artistUnion) {
+    // Response structure: { data: { artistUnion: { ... } } }
+    const artistData = response.data?.artistUnion;
+    
+    if (!artistData || !artistData.profile) {
       console.log(`❌ Artist not found on Spotify`);
       await updateArtistSpotifyStatus(spotifyId, 'completed', { sp_data_status: 'Not Found' });
       return;
     }
 
-    const artist = artistData.artistUnion;
+    const artist = artistData;
     const stats = artist.stats || {};
     const relatedArtists = artist.relatedContent?.relatedArtists?.items || [];
     const topCities = stats.topCities?.items || [];
@@ -172,7 +175,7 @@ async function enrichArtistFromSpotify(spotifyId: string, artistName: string) {
       .replace(/&quot;/g, '"')
       .replace(/&#43;/g, '+');
 
-    const genres = extractGenres(artistData);
+    const genres = extractGenres(artist);
 
     // Build update data
     const updateData: any = {
@@ -243,8 +246,8 @@ async function main() {
     if (!artists || artists.length === 0) {
       console.log('⚠️  Database query failed or empty, using test data\n');
       artists = [
-        { id: 'test-1', spotify_id: '06HL4z0CvFAxyc27GXpf94', name: 'Taylor Swift' },
-        { id: 'test-2', spotify_id: '5XeFesPbtLpXzIVDNQP79', name: 'The Weeknd' },
+        { id: 'test-1', spotify_id: '1Xyo4u8uXC1ZmMpatF05PJ', name: 'The Weeknd' },
+        { id: 'test-2', spotify_id: '3TVXtAsR1Inumichuu2iiC', name: 'Drake' },
       ];
       if (LIMIT) artists = artists.slice(0, LIMIT);
     }
