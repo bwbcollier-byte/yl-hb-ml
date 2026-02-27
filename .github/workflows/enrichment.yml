@@ -5,6 +5,12 @@ on:
     # Run daily at 2 AM UTC
     - cron: '0 2 * * *'
   workflow_dispatch: # Allow manual triggers
+    inputs:
+      record_limit:
+        description: 'Number of artists to process (leave empty for all)'
+        required: false
+        default: ''
+        type: string
 
 jobs:
   enrich:
@@ -31,7 +37,15 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-        run: node dist/index.js
+          LIMIT: ${{ github.event.inputs.record_limit }}
+        run: |
+          if [ -z "$LIMIT" ]; then
+            echo "Processing all pending artists..."
+            node dist/index.js <<< ""
+          else
+            echo "Processing $LIMIT artists..."
+            node dist/index.js <<< "$LIMIT"
+          fi
 
       - name: Report status
         if: always()
