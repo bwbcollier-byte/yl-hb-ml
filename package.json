@@ -6,6 +6,7 @@
   "scripts": {
     "start": "ts-node src/index.ts",
     "musicbrainz": "ts-node src/musicbrainz-artist-enrichment.ts",
+    "adb": "ts-node src/audiodb-artist-enrichment.ts",
     "build": "tsc",
     "dev": "ts-node src/index.ts"
   },

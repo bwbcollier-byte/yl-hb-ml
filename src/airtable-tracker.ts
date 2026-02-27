@@ -1,5 +1,5 @@
 import fetch from 'node-fetch';
-import { getSpotifyStats, getMusicBrainzStats } from './supabase';
+import { getSpotifyStats, getMusicBrainzStats, getAudioDBStats } from './supabase';
 
 const AIRTABLE_API_KEY = process.env.AIRTABLE_API_KEY!;
 const AIRTABLE_BASE_ID = 'appvOK60xuHCw3Fdz';
@@ -126,6 +126,52 @@ export async function trackMusicBrainzEnd(processed: number, errors: number) {
   const now = new Date();
   const timestamp = now.toLocaleString();
   const completionLog = `[${timestamp}] FINISH:\nProcessed ${processed} records with ${errors} errors for MusicBrainz. ${stats.todo} records still to be processed.`;
+  
+  await updateAirtable(recordId, {
+    'Run Status': 'Complete',
+    'Last Run': now.toISOString(),
+    'Records Todo': stats.todo,
+    'Records Done': stats.done,
+    'Records Total': stats.total,
+    'Run Details': `${completionLog}\n\n${existingDetails}`.trim()
+  });
+}
+
+export async function trackAudioDBStart() {
+  const recordId = 'recxapUq9b9H70LaW';
+  console.log('📝 Tracking AudioDB run start in Airtable...');
+  
+  const stats = await getAudioDBStats();
+  const existing = await getExistingRecord(recordId);
+  const existingDetails = existing?.fields?.['Run Details'] || '';
+  
+  const now = new Date();
+  const timestamp = now.toLocaleString();
+  const newLog = `[${timestamp}] START:\nNew run starting for AudioDB. Records Todo: ${stats.todo}`;
+  
+  console.log(`📝 Log entry:\n${newLog}`);
+
+  await updateAirtable(recordId, {
+    'Run Status': 'Running',
+    'Last Run': now.toISOString(),
+    'Records Todo': stats.todo,
+    'Records Done': stats.done,
+    'Records Total': stats.total,
+    'Run Details': `${newLog}\n\n${existingDetails}`.trim()
+  });
+}
+
+export async function trackAudioDBEnd(processed: number, errors: number) {
+  const recordId = 'recxapUq9b9H70LaW';
+  console.log('✅ Tracking AudioDB run completion in Airtable...');
+  
+  const stats = await getAudioDBStats();
+  const existing = await getExistingRecord(recordId);
+  const existingDetails = existing?.fields?.['Run Details'] || '';
+  
+  const now = new Date();
+  const timestamp = now.toLocaleString();
+  const completionLog = `[${timestamp}] FINISH:\nProcessed ${processed} records with ${errors} errors for AudioDB. ${stats.todo} records still to be processed.`;
   
   await updateAirtable(recordId, {
     'Run Status': 'Complete',

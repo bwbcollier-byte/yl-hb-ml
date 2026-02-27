@@ -551,3 +551,83 @@ export async function getMusicBrainzStats() {
 
   return { todo: todo || 0, done, total: total || 0 };
 }
+
+// ============================================================================
+// THEAUDIODB FUNCTIONS
+// ============================================================================
+
+/**
+ * Get artists that need TheAudioDB enrichment:
+ * - Must have musicbrainz_id set
+ * - adb_check is null (never processed)
+ */
+export async function getArtistsForAudioDBEnrichment(limit?: number) {
+  try {
+    console.log('⏳ Fetching artists for TheAudioDB enrichment from Supabase...');
+
+    let query = supabase
+      .from('talent_profiles')
+      .select('id, spotify_id, name, musicbrainz_id, adb_check')
+      .not('musicbrainz_id', 'is', null)
+      .is('adb_check', null);
+
+    if (limit) {
+      query = query.limit(limit);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      throw new Error(`Failed to fetch artists for TheAudioDB: ${error.message}`);
+    }
+
+    console.log(`✅ Found ${data?.length || 0} artists to AudioDB-enrich`);
+    return data || [];
+  } catch (err: any) {
+    console.error('⚠️ AudioDB query error:', err.message);
+    return [];
+  }
+}
+
+/**
+ * Update a talent_profiles row with TheAudioDB enrichment data
+ */
+export async function updateArtistAudioDBData(
+  spotifyId: string,
+  adbFields: Record<string, any>
+) {
+  const { data, error } = await supabase
+    .from('talent_profiles')
+    .update({
+      ...adbFields,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('spotify_id', spotifyId);
+
+  if (error) {
+    throw new Error(`Failed to update artist ADB data: ${error.message}`);
+  }
+
+  return data;
+}
+
+/**
+ * Get stats for TheAudioDB enrichment progress
+ */
+export async function getAudioDBStats() {
+  const { count: total } = await supabase
+    .from('talent_profiles')
+    .select('id', { count: 'exact', head: true })
+    .not('musicbrainz_id', 'is', null);
+
+  const { count: todo } = await supabase
+    .from('talent_profiles')
+    .select('id', { count: 'exact', head: true })
+    .not('musicbrainz_id', 'is', null)
+    .is('adb_check', null);
+
+  const done = (total || 0) - (todo || 0);
+
+  return { todo: todo || 0, done, total: total || 0 };
+}
+
