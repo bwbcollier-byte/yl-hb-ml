@@ -194,11 +194,27 @@ export async function updateArtistConcertCount(spotifyId: string, count: string 
     })
     .eq('spotify_id', spotifyId);
 
-  if (error) {
-    throw new Error(`Failed to update concert count: ${error.message}`);
-  }
-
   return data;
+}
+
+/**
+ * Get stats for Spotify enrichment progress
+ */
+export async function getSpotifyStats() {
+  const { count: total } = await supabase
+    .from('talent_profiles')
+    .select('*', { count: 'exact', head: true })
+    .not('spotify_id', 'is', null);
+
+  const { count: todo } = await supabase
+    .from('talent_profiles')
+    .select('*', { count: 'exact', head: true })
+    .not('spotify_id', 'is', null)
+    .is('sp_check', null);
+
+  const done = (total || 0) - (todo || 0);
+
+  return { todo: todo || 0, done, total: total || 0 };
 }
 
 // ============================================================================
@@ -513,9 +529,25 @@ export async function updateArtistMusicBrainzData(
     })
     .eq('spotify_id', spotifyId);
 
-  if (error) {
-    throw new Error(`Failed to update MusicBrainz data for ${spotifyId}: ${error.message}`);
-  }
-
   return data;
+}
+
+/**
+ * Get stats for MusicBrainz enrichment progress
+ */
+export async function getMusicBrainzStats() {
+  const { count: total } = await supabase
+    .from('talent_profiles')
+    .select('*', { count: 'exact', head: true })
+    .not('musicbrainz_id', 'is', null);
+
+  const { count: todo } = await supabase
+    .from('talent_profiles')
+    .select('*', { count: 'exact', head: true })
+    .not('musicbrainz_id', 'is', null)
+    .is('mb_check', null);
+
+  const done = (total || 0) - (todo || 0);
+
+  return { todo: todo || 0, done, total: total || 0 };
 }

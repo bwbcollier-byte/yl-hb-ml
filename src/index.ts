@@ -1,6 +1,7 @@
 import dotenv from 'dotenv';
 import https from 'https';
 import readline from 'readline';
+import { trackSpotifyStart, trackSpotifyEnd } from './airtable-tracker';
 import {
   supabase,
   updateArtistSpotifyStatus,
@@ -441,7 +442,7 @@ async function enrichArtistFromSpotify(spotifyId: string, artistName: string) {
       .eq('spotify_id', spotifyId)
       .single();
 
-    const talentProfileId = profileData?.id || '';
+    const talentProfileId = profileData?.id || null;
     const artistImage = avatarUrls[0] || '';
 
     // Process related data (albums, related artists, concerts)
@@ -514,6 +515,9 @@ async function main() {
   // Prompt for limit if not set
   const effectiveLimit = await promptForLimit();
 
+  // Track start in Airtable
+  await trackSpotifyStart();
+
   try {
     let artists = await getPendingArtists(effectiveLimit);
 
@@ -563,6 +567,10 @@ async function main() {
     console.log(`   Processed: ${processed}`);
     console.log(`   Skipped: ${skipped}`);
     console.log(`   Errors: ${errors}`);
+
+    // Track end in Airtable
+    await trackSpotifyEnd(processed, errors);
+
 
   } catch (error: any) {
     console.error('❌ Fatal error:', error.message);

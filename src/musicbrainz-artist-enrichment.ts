@@ -7,6 +7,7 @@ import {
   getAlbumsByArtistId,
   updateAlbumMusicBrainzData,
 } from './supabase';
+import { trackMusicBrainzStart, trackMusicBrainzEnd } from './airtable-tracker';
 
 dotenv.config();
 
@@ -578,7 +579,11 @@ async function main() {
     process.exit(1);
   }
 
+  // Track start in Airtable
+  await trackMusicBrainzStart();
+
   const limit = await promptForLimit();
+
 
   let processed = 0;
   let skipped = 0;
@@ -624,6 +629,10 @@ async function main() {
     console.log(`⏭️  Skipped:   ${skipped}`);
     console.log(`❌ Errors:    ${errors}`);
     console.log('==================================================\n');
+
+    // Track end in Airtable
+    await trackMusicBrainzEnd(processed, errors);
+
 
   } catch (error) {
     console.error('❌ Fatal error:', error);
