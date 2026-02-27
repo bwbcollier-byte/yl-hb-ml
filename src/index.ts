@@ -1,9 +1,19 @@
 import dotenv from 'dotenv';
 import https from 'https';
+import readline from 'readline';
 import {
+  supabase,
   updateArtistSpotifyStatus,
   updateArtistSpotifyData,
   getPendingArtists,
+  getAlbumBySpotifyId,
+  upsertAlbum,
+  getRelatedArtistBySpotifyId,
+  createRelatedArtist,
+  getEventBySpotifyId,
+  upsertConcert,
+  updateArtistAlbumCounts,
+  updateArtistConcertCount,
 } from './supabase';
 
 dotenv.config();
@@ -121,6 +131,208 @@ function extractGenres(artist: any): string {
 }
 
 /**
+ * Process albums from artist discography
+ * Check if album exists -> upsert if exists, create if not
+ */
+async function processAlbums(discography: any, artistId: string, artistName: string, talentProfileId: string) {
+  // Flatten the nested releases structure
+  const albumGroups = discography?.albums?.items || [];
+  const flattenedAlbums: any[] = [];
+  
+  for (const group of albumGroups) {
+    const releases = group.releases?.items || [];
+    flattenedAlbums.push(...releases);
+  }
+  
+  if (flattenedAlbums.length === 0) {
+    console.log(`   📀 No albums found`);
+    return;
+  }
+
+  console.log(`   📀 Processing ${flattenedAlbums.length} albums...`);
+  let created = 0;
+  let updated = 0;
+
+  for (const album of flattenedAlbums) {
+    try {
+      const spotifyAlbumId = album.id;
+      const existing = await getAlbumBySpotifyId(spotifyAlbumId);
+
+      const releaseYear = album.date?.year?.toString() || '';
+
+      const albumData = {
+        spotify_album_id: spotifyAlbumId,
+        album_name: album.name,
+        spotify_artist_id: artistId,
+        spotify_artist_name: artistName,
+        talent_profile_id: talentProfileId,
+        spotify_type: album.type,
+        cover_art_url: album.coverArt?.sources?.[0]?.url || '',
+        release_date: `${album.date?.year || ''}-${String(album.date?.month || '').padStart(2, '0')}-${String(album.date?.day || '').padStart(2, '0')}`,
+        release_year: releaseYear,
+        track_count: album.tracks?.totalCount?.toString() || '0',
+        label: album.label,
+      };
+
+      if (existing) {
+        await upsertAlbum(albumData);
+        updated++;
+      } else {
+        await upsertAlbum(albumData);
+        created++;
+      }
+    } catch (error) {
+      console.log(`      ⚠️  Failed to process album: ${error}`);
+    }
+  }
+
+  console.log(`      ✅ Albums: ${created} created, ${updated} updated`);
+}
+
+/**
+ * Process related artists
+ * Create new artist records for related artists with additional metadata
+ * Update origin artist with related artist IDs and names
+ */
+async function processRelatedArtists(relatedContent: any, parentArtistId: string, parentArtistName: string) {
+  const relatedArtists = relatedContent?.relatedArtists?.items || [];
+  if (relatedArtists.length === 0) {
+    console.log(`   👥 No related artists found`);
+    return;
+  }
+
+  console.log(`   👥 Processing ${relatedArtists.length} related artists...`);
+  let created = 0;
+  let skipped = 0;
+  const relatedIds: string[] = [];
+  const relatedNames: string[] = [];
+
+  for (const artist of relatedArtists) {
+    try {
+      const spotifyId = artist.id;
+      const artistName = artist.profile?.name || artist.name || '';
+      const avatarUrl = artist.visuals?.avatarImage?.sources?.[0]?.url || '';
+      
+      const existing = await getRelatedArtistBySpotifyId(spotifyId);
+
+      if (existing) {
+        skipped++;
+      } else {
+        const artistData = {
+          spotify_id: spotifyId,
+          name: artistName,
+          sp_type: 'Artist',
+          sp_avatar_image_urls: avatarUrl,
+          sp_image: avatarUrl,
+          sp_data_status: 'Todo',
+          sp_artist_id: spotifyId,
+        };
+
+        await createRelatedArtist(artistData);
+        created++;
+      }
+      
+      relatedIds.push(spotifyId);
+      relatedNames.push(artistName);
+    } catch (error) {
+      console.log(`      ⚠️  Failed to process related artist: ${error}`);
+    }
+  }
+
+  // Update origin record with related artist metadata
+  try {
+    const { data: originRecord } = await supabase
+      .from('talent_profiles')
+      .select('id')
+      .eq('spotify_id', parentArtistId)
+      .single();
+
+    if (originRecord) {
+      const updateData = {
+        sp_related_artist_ids: relatedIds.join(','),
+        sp_related_artist_names: relatedNames.map(n => toTitleCase(n)).join(','),
+        sp_data_status: 'Complete',
+        sp_check: new Date().toISOString(),
+      };
+
+      await supabase
+        .from('talent_profiles')
+        .update(updateData)
+        .eq('spotify_id', parentArtistId);
+    }
+  } catch (error) {
+    console.log(`      ⚠️  Failed to update origin record: ${error}`);
+  }
+
+  console.log(`      ✅ Related Artists: ${created} created, ${skipped} skipped`);
+}
+
+/**
+ * Process concerts/events
+ * Check if concert exists -> upsert if exists, create if not
+ */
+async function processConcerts(goods: any, artistId: string, artistName: string, talentProfileId: string, artistImage: string) {
+  const concerts = goods?.events?.concerts?.items || [];
+  if (concerts.length === 0) {
+    console.log(`   🎪 No concerts found`);
+    return;
+  }
+
+  console.log(`   🎪 Processing ${concerts.length} concerts...`);
+  let created = 0;
+  let updated = 0;
+
+  for (const concert of concerts) {
+    try {
+      const spotifyEventId = concert.id;
+      const existing = await getEventBySpotifyId(spotifyEventId);
+
+      const venue = concert.venue || {};
+      const coordinates = venue.coordinates || {};
+      const dateStr = concert.date?.isoString || concert.date;
+      
+      // Collect artist info from concert
+      const concertArtists = concert.artists?.items || [];
+      const artistUrls = concertArtists.map((a: any) => a.uri).join(',');
+      const artistIds = concertArtists.map((a: any) => a.id).join(',');
+      const artistNames = concertArtists.map((a: any) => a.profile?.name || a.name).join(',');
+
+      const concertData = {
+        spotify_id: spotifyEventId,
+        talent_profile_id: talentProfileId,
+        title: concert.title || concert.name,
+        status: 'Todo',
+        image: artistImage,
+        spotify_url: concert.uri,
+        spotify_title: concert.title || concert.name,
+        spotify_category: concert.category,
+        spotify_festival: concert.festival ? 'Yes' : 'No',
+        spotify_venue_name: venue.name,
+        spotify_location_name: venue.location?.name,
+        spotify_latitude: coordinates.latitude ? parseFloat(coordinates.latitude.toString()) : undefined,
+        spotify_longitude: coordinates.longitude ? parseFloat(coordinates.longitude.toString()) : undefined,
+        spotify_artist_urls: artistUrls,
+        spotify_artist_ids: artistIds,
+        spotify_artist_names: artistNames,
+        spotify_date: dateStr,
+      };
+
+      if (existing) {
+        await upsertConcert(concertData);
+        updated++;
+      } else {
+        await upsertConcert(concertData);
+        created++;
+      }
+    } catch (error) {
+      console.log(`      ⚠️  Failed to process concert: ${error}`);
+    }
+  }
+
+  console.log(`      ✅ Concerts: ${created} created, ${updated} updated`);
+}
+
+/**
  * Main enrichment function for Spotify artist data
  */
 async function enrichArtistFromSpotify(spotifyId: string, artistName: string) {
@@ -222,11 +434,72 @@ async function enrichArtistFromSpotify(spotifyId: string, artistName: string) {
     await updateArtistSpotifyData(spotifyId, updateData);
     console.log(`✅ Updated Supabase for ${artistName}`);
 
+    // Get talent_profile_id for linking related records
+    const { data: profileData } = await supabase
+      .from('talent_profiles')
+      .select('id')
+      .eq('spotify_id', spotifyId)
+      .single();
+
+    const talentProfileId = profileData?.id || '';
+    const artistImage = avatarUrls[0] || '';
+
+    // Process related data (albums, related artists, concerts)
+    console.log(`\n   Processing additional data...`);
+    
+    // Process albums
+    await processAlbums(artistData.discography, spotifyId, artistName, talentProfileId);
+    
+    // Process related artists
+    await processRelatedArtists(artistData.relatedContent, spotifyId, artistName);
+    
+    // Process concerts
+    await processConcerts(artistData.goods, spotifyId, artistName, talentProfileId, artistImage);
+
+    console.log(`\n✅ Fully enriched ${artistName}\n`);
+
   } catch (error) {
     console.error(`❌ Error processing ${artistName}:`, error);
     await updateArtistSpotifyStatus(spotifyId, 'error', { sp_data_status: 'Error' });
     throw error;
   }
+}
+
+/**
+ * Prompt user for number of records to process
+ */
+function promptForLimit(): Promise<number | undefined> {
+  return new Promise((resolve) => {
+    // If LIMIT is already set via environment, use it
+    if (LIMIT) {
+      console.log(`\n🔢 Using LIMIT from environment: ${LIMIT}`);
+      resolve(LIMIT);
+      return;
+    }
+
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+
+    rl.question('\n🔢 How many artists to process? (press Enter for all): ', (answer) => {
+      rl.close();
+      
+      if (!answer || answer.trim() === '') {
+        console.log('Processing all pending artists...');
+        resolve(undefined);
+      } else {
+        const num = parseInt(answer.trim(), 10);
+        if (isNaN(num) || num <= 0) {
+          console.log('⚠️  Invalid input. Processing all artists.');
+          resolve(undefined);
+        } else {
+          console.log(`Processing ${num} artists...`);
+          resolve(num);
+        }
+      }
+    });
+  });
 }
 
 /**
@@ -236,11 +509,12 @@ async function main() {
   console.log('🎵 Spotify Artist Enrichment Started');
   console.log('🔑 Using RapidAPI with key rotation (11 keys)');
   console.log(`⚡ Parallel processing: ${CONCURRENCY} artists at a time`);
-  if (LIMIT) console.log(`🔢 Limit: ${LIMIT} records`);
-  console.log('');
+
+  // Prompt for limit if not set
+  const effectiveLimit = await promptForLimit();
 
   try {
-    let artists = await getPendingArtists(LIMIT);
+    let artists = await getPendingArtists(effectiveLimit);
     
     // Fallback to test data if database query fails
     if (!artists || artists.length === 0) {
@@ -249,7 +523,7 @@ async function main() {
         { id: 'test-1', spotify_id: '1Xyo4u8uXC1ZmMpatF05PJ', name: 'The Weeknd' },
         { id: 'test-2', spotify_id: '3TVXtAsR1Inumichuu2iiC', name: 'Drake' },
       ];
-      if (LIMIT) artists = artists.slice(0, LIMIT);
+      if (effectiveLimit) artists = artists.slice(0, effectiveLimit);
     }
     
     console.log(`📋 Found ${artists.length} pending artists to process\n`);
