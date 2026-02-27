@@ -215,7 +215,7 @@ async function main() {
           await trackMusicFetchProgress();
         }
 
-        await sleep(500); // Respect potential rate limits
+        await sleep(2000); // 40 reqs/min limit (using 2s to be safe)
       } catch (err: any) {
         console.error(`\n❌ Fatal error during run:`, err.message);
         errors++;
