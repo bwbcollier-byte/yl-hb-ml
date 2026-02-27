@@ -471,8 +471,7 @@ export async function getArtistsForAdbEnrichment(limit?: number) {
       .from('talent_profiles')
       .select('id, spotify_id, name, musicbrainz_id, adb_status, adb_updates')
       .not('name', 'is', null)
-      .or('adb_status.is.null,adb_status.eq.,adb_status.eq.Error')
-      .order('created_at', { ascending: true });
+      .or('adb_status.is.null,adb_status.eq.,adb_status.eq.Error');
 
     if (limit) {
       query = query.limit(limit);
@@ -531,8 +530,7 @@ export async function getArtistsForMusicBrainzEnrichment(limit?: number) {
       .from('talent_profiles')
       .select('id, spotify_id, name, musicbrainz_id, mb_check')
       .not('musicbrainz_id', 'is', null)
-      .is('mb_check', null)
-      .order('created_at', { ascending: true });
+      .is('mb_check', null);
 
     if (limit) {
       query = query.limit(limit);
