@@ -55,8 +55,13 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 /**
  * Map MusicFetch services to Supabase social columns
  */
-function mapServicesToSocials(services: any, existingArtist: any) {
+/**
+ * Map MusicFetch services to Supabase socials
+ */
+function mapServices(services: any, existingArtist: any) {
   const socialMap: Record<string, string> = {};
+  const allSocialUrls: string[] = [];
+  const allVideoUrls: string[] = [];
   
   const mapping: Record<string, string> = {
     'appleMusic': 'social_apple_music',
@@ -85,14 +90,31 @@ function mapServicesToSocials(services: any, existingArtist: any) {
     'musicBrainz': 'musicbrainz_id'
   };
 
-  for (const [mfKey, sbColumn] of Object.entries(mapping)) {
-    const serviceData = services[mfKey];
-    if (serviceData?.link && !existingArtist[sbColumn]) {
-      socialMap[sbColumn] = serviceData.link;
+  const videoServices = ['youtube', 'youtubeMusic', 'tiktok', 'vimeo', 'trebel'];
+
+  for (const [mfKey, serviceData] of Object.entries(services)) {
+    const link = (serviceData as any)?.link;
+    if (!link) continue;
+
+    // 1. Add to specific columns if they exist and are empty
+    const sbColumn = mapping[mfKey];
+    if (sbColumn && !existingArtist[sbColumn]) {
+      socialMap[sbColumn] = link;
+    }
+
+    // 2. Categorize for the aggregate columns
+    if (videoServices.includes(mfKey)) {
+      allVideoUrls.push(link);
+    } else {
+      allSocialUrls.push(link);
     }
   }
 
-  return socialMap;
+  return {
+    socialMap,
+    mf_socials: allSocialUrls.join(', '),
+    mf_videos: allVideoUrls.join(', ')
+  };
 }
 
 async function fetchMusicFetchData(spotifyId: string, token: string) {
@@ -129,16 +151,18 @@ async function enrichArtist(artist: any, token: string) {
       return;
     }
 
-    const socials = mapServicesToSocials(mfData.services || {}, artist);
+    const { socialMap, mf_socials, mf_videos } = mapServices(mfData.services || {}, artist);
     
     const updateFields: Record<string, any> = {
-      ...socials,
+      ...socialMap,
       mf_id: mfData.id || null,
       mf_dob: mfData.dateOfBirth || null,
       mf_hometown: mfData.hometown || null,
       mf_description: mfData.description || null,
       mf_aliases: mfData.aliases ? mfData.aliases.join(', ') : null,
       mf_image: mfData.image?.url || null,
+      mf_socials: mf_socials || null,
+      mf_videos: mf_videos || null,
       mf_check: 'completed'
     };
 
@@ -149,7 +173,7 @@ async function enrichArtist(artist: any, token: string) {
     }
 
     await updateArtistMusicFetchData(artist.spotify_id, updateFields);
-    console.log(`   ✅ Saved MusicFetch fields and ${Object.keys(socials).length} social links`);
+    console.log(`   ✅ Saved MusicFetch fields and ${Object.keys(socialMap).length} social links`);
 
   } catch (err: any) {
     console.error(`   ❌ Error: ${err.message}`);
