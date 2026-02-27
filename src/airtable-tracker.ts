@@ -55,7 +55,7 @@ export async function trackSpotifyStart() {
   
   const now = new Date();
   const timestamp = now.toLocaleString();
-  const newLog = `${timestamp}\nNew run starting and there are ${stats.todo} records to process\n\n`;
+  const newLog = `[${timestamp}] START: New run starting. Records Todo: ${stats.todo}`;
   
   await updateAirtable(recordId, {
     'Run Status': 'Running',
@@ -63,7 +63,7 @@ export async function trackSpotifyStart() {
     'Records Todo': stats.todo,
     'Records Done': stats.done,
     'Records Total': stats.total,
-    'Run Details': newLog + existingDetails
+    'Run Details': `${newLog}\n\n${existingDetails}`.trim()
   });
 }
 
@@ -77,7 +77,7 @@ export async function trackSpotifyEnd(processed: number, errors: number) {
   
   const now = new Date();
   const timestamp = now.toLocaleString();
-  const completionLog = `\n\n${timestamp}\nFinished run and processed ${processed} records with ${errors} errors`;
+  const completionLog = `[${timestamp}] FINISH: Processed ${processed} records with ${errors} errors.`;
   
   await updateAirtable(recordId, {
     'Run Status': 'Complete',
@@ -85,7 +85,7 @@ export async function trackSpotifyEnd(processed: number, errors: number) {
     'Records Todo': stats.todo,
     'Records Done': stats.done,
     'Records Total': stats.total,
-    'Run Details': existingDetails + completionLog
+    'Run Details': `${completionLog}\n\n${existingDetails}`.trim()
   });
 }
 
@@ -99,7 +99,7 @@ export async function trackMusicBrainzStart() {
   
   const now = new Date();
   const timestamp = now.toLocaleString();
-  const newLog = `${timestamp}\nNew run starting and there are ${stats.todo} records to process\n\n`;
+  const newLog = `[${timestamp}] START: New run starting. Records Todo: ${stats.todo}`;
   
   await updateAirtable(recordId, {
     'Run Status': 'Running',
@@ -107,7 +107,7 @@ export async function trackMusicBrainzStart() {
     'Records Todo': stats.todo,
     'Records Done': stats.done,
     'Records Total': stats.total,
-    'Run Details': newLog + existingDetails
+    'Run Details': `${newLog}\n\n${existingDetails}`.trim()
   });
 }
 
@@ -121,7 +121,7 @@ export async function trackMusicBrainzEnd(processed: number, errors: number) {
   
   const now = new Date();
   const timestamp = now.toLocaleString();
-  const completionLog = `\n\n${timestamp}\nFinished run and processed ${processed} records with ${errors} errors`;
+  const completionLog = `[${timestamp}] FINISH: Processed ${processed} records with ${errors} errors.`;
   
   await updateAirtable(recordId, {
     'Run Status': 'Complete',
@@ -129,6 +129,6 @@ export async function trackMusicBrainzEnd(processed: number, errors: number) {
     'Records Todo': stats.todo,
     'Records Done': stats.done,
     'Records Total': stats.total,
-    'Run Details': existingDetails + completionLog
+    'Run Details': `${completionLog}\n\n${existingDetails}`.trim()
   });
 }
