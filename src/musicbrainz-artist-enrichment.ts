@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 import fetch from 'node-fetch';
+import readline from 'readline';
 import {
   getArtistsForMusicBrainzEnrichment,
   updateArtistMusicBrainzData,
@@ -11,7 +12,39 @@ dotenv.config();
 
 // Configuration
 const AUDIODB_API_KEY = process.env.AUDIODB_API_KEY || '2';
-const LIMIT = process.env.LIMIT ? parseInt(process.env.LIMIT) : undefined;
+const ENV_LIMIT = process.env.LIMIT ? parseInt(process.env.LIMIT) : undefined;
+
+/**
+ * Interactive prompt for how many artists to process.
+ * Skipped if LIMIT is already set via environment variable.
+ */
+function promptForLimit(): Promise<number | undefined> {
+  return new Promise((resolve) => {
+    if (ENV_LIMIT) {
+      console.log(`\n🔢 Using LIMIT from environment: ${ENV_LIMIT}`);
+      resolve(ENV_LIMIT);
+      return;
+    }
+
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    rl.question('\n🔢 How many artists to process? (press Enter for all): ', (answer) => {
+      rl.close();
+      if (!answer || answer.trim() === '') {
+        console.log('Processing all pending artists...');
+        resolve(undefined);
+      } else {
+        const num = parseInt(answer.trim(), 10);
+        if (isNaN(num) || num <= 0) {
+          console.log('⚠️  Invalid input. Processing all artists.');
+          resolve(undefined);
+        } else {
+          console.log(`Processing ${num} artists...`);
+          resolve(num);
+        }
+      }
+    });
+  });
+}
 
 // Rate limiting
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -582,19 +615,20 @@ async function enrichArtist(artist: any): Promise<void> {
 async function main() {
   console.log('🎵 MusicBrainz & TheAudioDB Enrichment (Supabase)');
   console.log('==================================================\n');
-  if (LIMIT) console.log(`⚠️  LIMIT: ${LIMIT} records (testing mode)\n`);
 
   if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
     console.error('❌ Missing SUPABASE_URL or SUPABASE_SERVICE_KEY in .env');
     process.exit(1);
   }
 
+  const limit = await promptForLimit();
+
   let processed = 0;
   let skipped = 0;
   let errors = 0;
 
   try {
-    const artists = await getArtistsForMusicBrainzEnrichment(LIMIT);
+    const artists = await getArtistsForMusicBrainzEnrichment(limit);
 
     if (artists.length === 0) {
       console.log('No artists to process. All caught up! ✅');

@@ -1,4 +1,5 @@
 import dotenv from 'dotenv';
+import readline from 'readline';
 import {
   getArtistsForAdbEnrichment,
   updateArtistAdbData,
@@ -10,7 +11,39 @@ dotenv.config();
 const AUDIODB_API_KEY = process.env.AUDIODB_API_KEY || '925704';
 const AUDIODB_API_BASE = 'https://www.theaudiodb.com/api/v1/json';
 const RATE_LIMIT_DELAY = 1000; // 1 second between requests
-const LIMIT = process.env.LIMIT ? parseInt(process.env.LIMIT) : undefined;
+const ENV_LIMIT = process.env.LIMIT ? parseInt(process.env.LIMIT) : undefined;
+
+/**
+ * Interactive prompt for how many artists to process.
+ * Skipped if LIMIT is already set via environment variable.
+ */
+function promptForLimit(): Promise<number | undefined> {
+  return new Promise((resolve) => {
+    if (ENV_LIMIT) {
+      console.log(`\n🔢 Using LIMIT from environment: ${ENV_LIMIT}`);
+      resolve(ENV_LIMIT);
+      return;
+    }
+
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    rl.question('\n🔢 How many artists to process? (press Enter for all): ', (answer) => {
+      rl.close();
+      if (!answer || answer.trim() === '') {
+        console.log('Processing all pending artists...');
+        resolve(undefined);
+      } else {
+        const num = parseInt(answer.trim(), 10);
+        if (isNaN(num) || num <= 0) {
+          console.log('⚠️  Invalid input. Processing all artists.');
+          resolve(undefined);
+        } else {
+          console.log(`Processing ${num} artists...`);
+          resolve(num);
+        }
+      }
+    });
+  });
+}
 
 // Utility: Sleep function for rate limiting
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -282,7 +315,6 @@ async function main() {
   console.log('🎵 TheAudioDB Artist Enrichment (Supabase)');
   console.log('==========================================\n');
   console.log(`API Key: ${AUDIODB_API_KEY}`);
-  if (LIMIT) console.log(`Limit: ${LIMIT} records\n`);
 
   // Validate Supabase config
   if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
@@ -290,9 +322,11 @@ async function main() {
     process.exit(1);
   }
 
+  const limit = await promptForLimit();
+
   try {
     // Fetch artists from Supabase
-    const artists = await getArtistsForAdbEnrichment(LIMIT);
+    const artists = await getArtistsForAdbEnrichment(limit);
 
     if (artists.length === 0) {
       console.log('No artists to process. All caught up! ✅');
