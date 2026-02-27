@@ -14,6 +14,10 @@ export const supabase: SupabaseClient = createClient(SUPABASE_URL, SUPABASE_SERV
   },
 });
 
+// ============================================================================
+// SPOTIFY FUNCTIONS
+// ============================================================================
+
 /**
  * Upsert a music artist profile to talent_profiles table
  */
@@ -59,14 +63,12 @@ export async function getArtistProfile(spotifyId: string) {
 }
 
 /**
- * Get all artists for enrichment
+ * Get all artists for Spotify enrichment
  */
 export async function getPendingArtists(limit?: number) {
   try {
     console.log('⏳ Fetching artists from Supabase...');
-    
-    // Query without ORDER BY to avoid full table scan on large table
-    // Just get the first N artists with spotify_id
+
     const { data, error } = await supabase
       .from('talent_profiles')
       .select('spotify_id, name')
@@ -77,7 +79,6 @@ export async function getPendingArtists(limit?: number) {
       throw new Error(`Failed to fetch artists: ${error.message}`);
     }
 
-    // Transform to use spotify_id as id
     const artists = data?.map(row => ({
       id: row.spotify_id,
       spotify_id: row.spotify_id,
@@ -139,11 +140,9 @@ export async function updateArtistSpotifyData(
 }
 
 /**
- * Get tracking metadata (from a dedicated tracking table or record)
+ * Get tracking metadata
  */
 export async function getTrackingMetadata() {
-  // For now, return basic tracking info
-  // You may want to add a dedicated enrichment_tracking table later
   return {
     last_check: new Date().toISOString(),
   };
@@ -257,6 +256,44 @@ export async function upsertAlbum(albumData: {
 
   if (error) {
     throw new Error(`Failed to upsert album: ${error.message}`);
+  }
+
+  return data;
+}
+
+/**
+ * Get all albums for an artist from media_profiles (by spotify_artist_id or artist name)
+ */
+export async function getAlbumsByArtistId(spotifyArtistId: string) {
+  const { data, error } = await supabase
+    .from('media_profiles')
+    .select('*')
+    .eq('spotify_artist_id', spotifyArtistId);
+
+  if (error) {
+    throw new Error(`Failed to fetch albums for artist ${spotifyArtistId}: ${error.message}`);
+  }
+
+  return data || [];
+}
+
+/**
+ * Update a media_profiles row with MusicBrainz data
+ */
+export async function updateAlbumMusicBrainzData(
+  spotifyAlbumId: string,
+  mbFields: Record<string, any>
+) {
+  const { data, error } = await supabase
+    .from('media_profiles')
+    .update({
+      ...mbFields,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('spotify_album_id', spotifyAlbumId);
+
+  if (error) {
+    throw new Error(`Failed to update album MB data for ${spotifyAlbumId}: ${error.message}`);
   }
 
   return data;
@@ -400,13 +437,11 @@ export async function upsertConcert(concertData: {
   let data, error;
 
   if (existing) {
-    // Update existing record
     ({ data, error } = await supabase
       .from('event_profiles')
       .update(concertPayload)
       .eq('spotify_id', concertData.spotify_id));
   } else {
-    // Insert new record
     ({ data, error } = await supabase
       .from('event_profiles')
       .insert(concertPayload));
@@ -414,6 +449,126 @@ export async function upsertConcert(concertData: {
 
   if (error) {
     throw new Error(`Failed to upsert concert: ${error.message}`);
+  }
+
+  return data;
+}
+
+// ============================================================================
+// ADB (THEAUDIODB) FUNCTIONS
+// ============================================================================
+
+/**
+ * Get artists that need ADB enrichment:
+ * - adb_status is null, empty, or not 'Complete'/'Not Found'
+ * - Has a name to search with
+ */
+export async function getArtistsForAdbEnrichment(limit?: number) {
+  try {
+    console.log('⏳ Fetching artists for ADB enrichment from Supabase...');
+
+    let query = supabase
+      .from('talent_profiles')
+      .select('id, spotify_id, name, musicbrainz_id, adb_status, adb_updates')
+      .not('name', 'is', null)
+      .or('adb_status.is.null,adb_status.eq.,adb_status.eq.Error')
+      .order('created_at', { ascending: true });
+
+    if (limit) {
+      query = query.limit(limit);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      throw new Error(`Failed to fetch artists for ADB: ${error.message}`);
+    }
+
+    console.log(`✅ Found ${data?.length || 0} artists to ADB-enrich`);
+    return data || [];
+  } catch (err: any) {
+    console.error('⚠️ ADB query error:', err.message);
+    return [];
+  }
+}
+
+/**
+ * Update a talent_profiles row with ADB enrichment data
+ */
+export async function updateArtistAdbData(
+  spotifyId: string,
+  adbFields: Record<string, any>
+) {
+  const { data, error } = await supabase
+    .from('talent_profiles')
+    .update({
+      ...adbFields,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('spotify_id', spotifyId);
+
+  if (error) {
+    throw new Error(`Failed to update ADB data for ${spotifyId}: ${error.message}`);
+  }
+
+  return data;
+}
+
+// ============================================================================
+// MUSICBRAINZ FUNCTIONS
+// ============================================================================
+
+/**
+ * Get artists that need MusicBrainz enrichment:
+ * - Must have musicbrainz_id set
+ * - mb_check is null (never processed)
+ */
+export async function getArtistsForMusicBrainzEnrichment(limit?: number) {
+  try {
+    console.log('⏳ Fetching artists for MusicBrainz enrichment from Supabase...');
+
+    let query = supabase
+      .from('talent_profiles')
+      .select('id, spotify_id, name, musicbrainz_id, mb_check')
+      .not('musicbrainz_id', 'is', null)
+      .is('mb_check', null)
+      .order('created_at', { ascending: true });
+
+    if (limit) {
+      query = query.limit(limit);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      throw new Error(`Failed to fetch artists for MusicBrainz: ${error.message}`);
+    }
+
+    console.log(`✅ Found ${data?.length || 0} artists to MusicBrainz-enrich`);
+    return data || [];
+  } catch (err: any) {
+    console.error('⚠️ MusicBrainz query error:', err.message);
+    return [];
+  }
+}
+
+/**
+ * Update a talent_profiles row with MusicBrainz enrichment data
+ */
+export async function updateArtistMusicBrainzData(
+  spotifyId: string,
+  mbFields: Record<string, any>
+) {
+  const { data, error } = await supabase
+    .from('talent_profiles')
+    .update({
+      ...mbFields,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('spotify_id', spotifyId);
+
+  if (error) {
+    throw new Error(`Failed to update MusicBrainz data for ${spotifyId}: ${error.message}`);
   }
 
   return data;
