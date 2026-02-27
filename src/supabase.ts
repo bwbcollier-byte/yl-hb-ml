@@ -795,30 +795,35 @@ export async function updateArtistMusicFetchData(spotifyId: string, fields: Reco
  */
 export async function getMusicFetchStats() {
   try {
+    // Total: Artists with a Spotify ID (eligible for MusicFetch)
     const { count: total, error: totalErr } = await supabase
       .from('talent_profiles')
-      .select('*', { count: 'exact', head: true })
+      .select('id', { count: 'exact', head: true })
       .not('spotify_id', 'is', null);
 
-    const { count: done, error: doneErr } = await supabase
+    if (totalErr) throw totalErr;
+
+    // Todo: Eligible artists where mf_check is still null
+    const { count: todo, error: todoErr } = await supabase
       .from('talent_profiles')
-      .select('*', { count: 'exact', head: true })
+      .select('id', { count: 'exact', head: true })
       .not('spotify_id', 'is', null)
-      .is('mf_check', 'completed');
+      .is('mf_check', null);
 
-    if (totalErr || doneErr) throw new Error('Failed to fetch counts');
+    if (todoErr) throw todoErr;
 
-    const totalCount = total || 0;
-    const doneCount = done || 0;
+    const totalVal = total || 0;
+    const todoVal = todo || 0;
+    const doneVal = totalVal - todoVal;
 
     return {
-      total: totalCount,
-      done: doneCount,
-      todo: Math.max(0, totalCount - doneCount)
+      todo: todoVal,
+      done: doneVal,
+      total: totalVal
     };
   } catch (error: any) {
     console.error('❌ Error fetching MusicFetch stats:', error.message);
-    return { total: 0, done: 0, todo: 0 };
+    return { todo: 0, done: 0, total: 0 };
   }
 }
 
