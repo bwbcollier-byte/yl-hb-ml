@@ -33,13 +33,9 @@ jobs:
       
       - name: Run enrichment
         env:
-          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           AUDIODB_API_KEY: ${{ secrets.AUDIODB_API_KEY }}
-          AIRTABLE_BASE_ID: appiYGWjEZVB76yyl
-          AIRTABLE_TABLE_ID: tblQ3DrCHekgRqj7Z
-          AIRTABLE_VIEW_NAME: Musicbrainz Process
-          ALBUMS_BASE_ID: appYXhhXgVkSblLdl
-          ALBUMS_TABLE_ID: tblYaSMImRbOr9CX3
           LIMIT: ${{ github.event.inputs.limit }}
         run: node dist/musicbrainz-artist-enrichment.js
       

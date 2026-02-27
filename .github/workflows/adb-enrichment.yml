@@ -28,10 +28,8 @@ jobs:
 
       - name: Run ADB enrichment
         env:
-          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
-          AIRTABLE_BASE_ID: appiYGWjEZVB76yyl
-          AIRTABLE_TABLE_ID: tblQ3DrCHekgRqj7Z
-          AIRTABLE_VIEW_NAME: ADB Process
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           AUDIODB_API_KEY: ${{ secrets.AUDIODB_API_KEY }}
         run: node dist/adb-artist-enrichment.js
 
