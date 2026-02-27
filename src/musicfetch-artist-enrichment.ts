@@ -9,6 +9,9 @@ import { trackMusicFetchStart, trackMusicFetchEnd, trackMusicFetchProgress } fro
 
 dotenv.config();
 
+// Configuration
+const ENV_LIMIT = process.env.LIMIT ? parseInt(process.env.LIMIT) : undefined;
+
 /**
  * Interactive prompt for the MusicFetch API Token
  */
@@ -37,14 +40,21 @@ function promptForToken(): Promise<string> {
  */
 function promptForLimit(): Promise<number | undefined> {
   return new Promise((resolve) => {
+    if (ENV_LIMIT || process.env.CI) {
+      if (ENV_LIMIT) console.log(`\n🔢 Using LIMIT from environment: ${ENV_LIMIT}`);
+      else console.log(`\n🤖 CI Environment detected, skipping interactive prompt.`);
+      resolve(ENV_LIMIT);
+      return;
+    }
+
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    rl.question('\n🔢 How many artists to process? (press Enter for default 100): ', (answer) => {
+    rl.question('\n🔢 How many artists to process? (press Enter for all): ', (answer) => {
       rl.close();
       if (!answer || answer.trim() === '') {
-        resolve(100);
+        resolve(undefined);
       } else {
         const num = parseInt(answer.trim(), 10);
-        resolve(isNaN(num) ? 100 : num);
+        resolve(isNaN(num) ? undefined : num);
       }
     });
   });
