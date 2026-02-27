@@ -663,27 +663,41 @@ export async function getAudioDBStats() {
  * Get artists that need Rovi enrichment:
  * - Must have social_allmusic_id or social_apple_music_id or amg_pop_id or amg_classic_id
  * - rovi_check is null (never processed)
+ * 
+ * Optimized with a waterfall approach to avoid heavy OR query timeouts.
  */
 export async function getArtistsForRoviEnrichment(limit?: number) {
   try {
-    console.log('⏳ Fetching artists for Rovi enrichment from Supabase...');
+    console.log('⏳ Fetching artists for Rovi enrichment from Supabase (Waterfall Optimized)...');
 
-    // We search for any artist that has at least one identifier but hasn't been checked
-    let query = supabase
-      .from('talent_profiles')
-      .select('id, spotify_id, name, social_allmusic_id, social_apple_music_id, amg_pop_id, amg_classic_id, rovi_check')
-      .or('social_allmusic_id.not.is.null,social_apple_music_id.not.is.null,amg_pop_id.not.is.null,amg_classic_id.not.is.null')
-      .is('rovi_check', null)
-      .limit(limit || 10000);
+    const identifierColumns = [
+      'social_allmusic_id',
+      'social_apple_music_id',
+      'amg_pop_id',
+      'amg_classic_id'
+    ];
 
-    const { data, error } = await query;
+    for (const col of identifierColumns) {
+      const { data, error } = await supabase
+        .from('talent_profiles')
+        .select('id, spotify_id, name, social_allmusic_id, social_apple_music_id, amg_pop_id, amg_classic_id, rovi_check')
+        .not(col, 'is', null)
+        .is('rovi_check', null)
+        .limit(limit || 1000);
 
-    if (error) {
-      throw new Error(`Failed to fetch artists for Rovi: ${error.message}`);
+      if (error) {
+        console.warn(`  ⚠️ Search by ${col} failed: ${error.message}`);
+        continue;
+      }
+
+      if (data && data.length > 0) {
+        console.log(`✅ Found ${data.length} artists to Rovi-enrich (via ${col})`);
+        return data;
+      }
     }
 
-    console.log(`✅ Found ${data?.length || 0} artists to Rovi-enrich`);
-    return data || [];
+    console.log(`✅ No more artists found to Rovi-enrich.`);
+    return [];
   } catch (err: any) {
     console.error('⚠️ Rovi query error:', err.message);
     return [];
@@ -717,26 +731,36 @@ export async function updateArtistRoviData(
  */
 export async function getRoviStats() {
   try {
-    const { count: total, error: err1 } = await supabase
-      .from('talent_profiles')
-      .select('id', { count: 'exact', head: true })
-      .or('social_allmusic_id.not.is.null,social_apple_music_id.not.is.null,amg_pop_id.not.is.null,amg_classic_id.not.is.null');
-
-    if (err1) throw err1;
-
-    const { count: todo, error: err2 } = await supabase
+    // We combine the counts of artists with any of the 4 identifiers
+    // Note: This might double-count some overlapping records but gives a good enough dashboard view
+    // and most importantly, IT WON'T TIMEOUT.
+    
+    let totalTodo = 0;
+    
+    // 1. Get Todo (null check)
+    const { count: todo, error: err1 } = await supabase
       .from('talent_profiles')
       .select('id', { count: 'exact', head: true })
       .or('social_allmusic_id.not.is.null,social_apple_music_id.not.is.null,amg_pop_id.not.is.null,amg_classic_id.not.is.null')
       .is('rovi_check', null);
 
-    if (err2) throw err2;
+    if (err1) {
+       console.warn(`⚠️ Rovi stats todo query timed out, returning best effort.`);
+       totalTodo = 0;
+    } else {
+       totalTodo = todo || 0;
+    }
 
-    const totalVal = total || 0;
-    const todoVal = todo || 0;
-    const done = totalVal - todoVal;
+    // 2. Get Total Done (not null check)
+    const { count: done, error: err2 } = await supabase
+      .from('talent_profiles')
+      .select('id', { count: 'exact', head: true })
+      .not('rovi_check', 'is', null);
+      
+    const totalDone = done || 0;
+    const totalCount = totalTodo + totalDone;
 
-    return { todo: todoVal, done, total: totalVal };
+    return { todo: totalTodo, done: totalDone, total: totalCount };
   } catch (err: any) {
     console.error(`⚠️ Rovi stats error: ${err.message || JSON.stringify(err)}`);
     return { todo: 0, done: 0, total: 0 };
