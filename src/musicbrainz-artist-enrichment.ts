@@ -12,7 +12,8 @@ import { trackMusicBrainzStart, trackMusicBrainzEnd, trackMusicBrainzProgress } 
 dotenv.config();
 
 // Configuration
-const ENV_LIMIT = process.env.LIMIT ? parseInt(process.env.LIMIT) : undefined;
+const LIMIT_ENV = process.env.LIMIT || "";
+const ENV_LIMIT = LIMIT_ENV.trim() !== "" ? parseInt(LIMIT_ENV, 10) : undefined;
 
 /**
  * Interactive prompt for how many artists to process.
@@ -20,10 +21,10 @@ const ENV_LIMIT = process.env.LIMIT ? parseInt(process.env.LIMIT) : undefined;
  */
 function promptForLimit(): Promise<number | undefined> {
   return new Promise((resolve) => {
-    if (ENV_LIMIT || process.env.CI) {
-      if (ENV_LIMIT) console.log(`\n🔢 Using LIMIT from environment: ${ENV_LIMIT}`);
+    if ((typeof ENV_LIMIT === 'number' && !isNaN(ENV_LIMIT)) || process.env.CI) {
+      if (typeof ENV_LIMIT === 'number' && !isNaN(ENV_LIMIT)) console.log(`\n🔢 Using LIMIT from environment: ${ENV_LIMIT}`);
       else console.log(`\n🤖 CI Environment detected, skipping interactive prompt.`);
-      resolve(ENV_LIMIT);
+      resolve(typeof ENV_LIMIT === 'number' && !isNaN(ENV_LIMIT) ? ENV_LIMIT : undefined);
       return;
     }
 

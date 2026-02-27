@@ -20,7 +20,8 @@ import {
 dotenv.config();
 
 // Configuration
-const LIMIT = process.env.LIMIT ? parseInt(process.env.LIMIT) : undefined;
+const LIMIT_ENV = process.env.LIMIT || "";
+const LIMIT = LIMIT_ENV.trim() !== "" ? parseInt(LIMIT_ENV, 10) : undefined;
 const CONCURRENCY = process.env.CONCURRENCY ? parseInt(process.env.CONCURRENCY) : 5;
 
 // RapidAPI keys for rotation (11 keys total)
@@ -472,10 +473,10 @@ async function enrichArtistFromSpotify(spotifyId: string, artistName: string) {
 function promptForLimit(): Promise<number | undefined> {
   return new Promise((resolve) => {
     // If LIMIT is already set via environment, use it
-    if (LIMIT || process.env.CI) {
-      if (LIMIT) console.log(`\n🔢 Using LIMIT from environment: ${LIMIT}`);
+    if ((typeof LIMIT === 'number' && !isNaN(LIMIT)) || process.env.CI) {
+      if (typeof LIMIT === 'number' && !isNaN(LIMIT)) console.log(`\n🔢 Using LIMIT from environment: ${LIMIT}`);
       else console.log(`\n🤖 CI Environment detected, skipping interactive prompt.`);
-      resolve(LIMIT);
+      resolve(typeof LIMIT === 'number' && !isNaN(LIMIT) ? LIMIT : undefined);
       return;
     }
 
