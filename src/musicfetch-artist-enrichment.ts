@@ -1,0 +1,216 @@
+import dotenv from 'dotenv';
+import fetch from 'node-fetch';
+import readline from 'readline';
+import {
+  getArtistsForMusicFetchEnrichment,
+  updateArtistMusicFetchData
+} from './supabase';
+import { trackMusicFetchStart, trackMusicFetchEnd, trackMusicFetchProgress } from './airtable-tracker';
+
+dotenv.config();
+
+/**
+ * Interactive prompt for the MusicFetch API Token
+ */
+function promptForToken(): Promise<string> {
+  return new Promise((resolve) => {
+    if (process.env.MUSICFETCH_TOKEN) {
+      console.log('🔑 Using MusicFetch Token from environment variable.');
+      resolve(process.env.MUSICFETCH_TOKEN);
+      return;
+    }
+
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    rl.question('\n🔑 Enter your MusicFetch API Token (x-token): ', (answer) => {
+      rl.close();
+      if (!answer || answer.trim() === '') {
+        console.error('❌ Token is required to run this enrichment.');
+        process.exit(1);
+      }
+      resolve(answer.trim());
+    });
+  });
+}
+
+/**
+ * Interactive prompt for how many artists to process
+ */
+function promptForLimit(): Promise<number | undefined> {
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    rl.question('\n🔢 How many artists to process? (press Enter for default 100): ', (answer) => {
+      rl.close();
+      if (!answer || answer.trim() === '') {
+        resolve(100);
+      } else {
+        const num = parseInt(answer.trim(), 10);
+        resolve(isNaN(num) ? 100 : num);
+      }
+    });
+  });
+}
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * Map MusicFetch services to Supabase social columns
+ */
+function mapServicesToSocials(services: any, existingArtist: any) {
+  const socialMap: Record<string, string> = {};
+  
+  const mapping: Record<string, string> = {
+    'appleMusic': 'social_apple_music',
+    'instagram': 'social_instagram',
+    'facebook': 'social_facebook',
+    'twitter': 'social_twitter',
+    'x': 'social_twitter',
+    'youtube': 'social_youtube',
+    'youtubeMusic': 'social_youtube_music',
+    'tiktok': 'social_tiktok',
+    'soundcloud': 'social_soundcloud',
+    'deezer': 'social_deezer',
+    'tidal': 'social_tidal',
+    'shazam': 'social_shazam',
+    'pandora': 'social_pandora',
+    'qobuz': 'social_qobuz',
+    'audiomack': 'social_audiomack',
+    'beatport': 'social_beatport',
+    'bandcamp': 'social_bandcamp',
+    'discogs': 'social_discogs',
+    'genius': 'social_genius',
+    'iHeartRadio': 'social_iheartradio',
+    'amazonMusic': 'social_amazon_music',
+    'amazon': 'social_amazon_store',
+    'wikipedia': 'social_wikipedia',
+    'musicBrainz': 'musicbrainz_id'
+  };
+
+  for (const [mfKey, sbColumn] of Object.entries(mapping)) {
+    const serviceData = services[mfKey];
+    if (serviceData?.link && !existingArtist[sbColumn]) {
+      socialMap[sbColumn] = serviceData.link;
+    }
+  }
+
+  return socialMap;
+}
+
+async function fetchMusicFetchData(spotifyId: string, token: string) {
+  const spotifyUrl = `https://open.spotify.com/artist/${spotifyId}`;
+  const services = 'spotify,amazon,anghami,youtubeMusic,youseeMusik,youtube,trebel,amazonMusic,audiomack,audius,awa,bandcamp,beatport,boomplay,deezer,discogs,flo,gaana,genius,iHeartRadio,jioSaavn,appleMusic,joox,kkbox,instagram,lineMusic,netease,musicBrainz,pandora,qobuz,qqMusic,sevenDigital,shazam,soundcloud,tidal,tiktok,yandex,wikipedia,x';
+  
+  const url = `https://api.musicfetch.io/url?url=${encodeURIComponent(spotifyUrl)}&services=${encodeURIComponent(services)}&country=US&withTracks=false`;
+
+  const response = await fetch(url, {
+    headers: { 'x-token': token }
+  });
+
+  if (response.status === 401 || response.status === 403) {
+    throw new Error('Invalid or expired MusicFetch token');
+  }
+
+  if (!response.ok) {
+    throw new Error(`MusicFetch API error: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  return data.result;
+}
+
+async function enrichArtist(artist: any, token: string) {
+  console.log(`📋 Processing: ${artist.name}`);
+  
+  try {
+    const mfData = await fetchMusicFetchData(artist.spotify_id, token);
+    
+    if (!mfData) {
+      console.log(`   ⚠️ No data found in MusicFetch for ${artist.name}`);
+      await updateArtistMusicFetchData(artist.spotify_id, { mf_check: 'no_data' });
+      return;
+    }
+
+    const socials = mapServicesToSocials(mfData.services || {}, artist);
+    
+    const updateFields: Record<string, any> = {
+      ...socials,
+      mf_id: mfData.id || null,
+      mf_dob: mfData.dateOfBirth || null,
+      mf_hometown: mfData.hometown || null,
+      mf_description: mfData.description || null,
+      mf_aliases: mfData.aliases ? mfData.aliases.join(', ') : null,
+      mf_image: mfData.image?.url || null,
+      mf_check: 'completed'
+    };
+
+    // If MusicBrainz ID was found, clean it up (it might be a URL)
+    if (updateFields.musicbrainz_id && updateFields.musicbrainz_id.includes('musicbrainz.org')) {
+      const parts = updateFields.musicbrainz_id.split('/');
+      updateFields.musicbrainz_id = parts[parts.length - 1];
+    }
+
+    await updateArtistMusicFetchData(artist.spotify_id, updateFields);
+    console.log(`   ✅ Saved MusicFetch fields and ${Object.keys(socials).length} social links`);
+
+  } catch (err: any) {
+    console.error(`   ❌ Error: ${err.message}`);
+    if (err.message.includes('token')) throw err; // Fatal
+    await updateArtistMusicFetchData(artist.spotify_id, { mf_check: `error: ${err.message}` });
+  }
+}
+
+async function main() {
+  console.log('\n🎵 MusicFetch Artist Enrichment');
+  console.log('===============================');
+
+  const token = await promptForToken();
+  const limit = await promptForLimit();
+
+  await trackMusicFetchStart();
+
+  let processed = 0;
+  let errors = 0;
+
+  try {
+    const artists = await getArtistsForMusicFetchEnrichment(limit);
+
+    if (artists.length === 0) {
+      console.log('No artists to process. All caught up! ✅');
+      return;
+    }
+
+    console.log(`\n📋 Processing ${artists.length} artist(s)...\n`);
+
+    for (const artist of artists) {
+      try {
+        await enrichArtist(artist, token);
+        processed++;
+
+        // Update progress every 100 records
+        if (processed > 0 && processed % 100 === 0) {
+          console.log(`\n📊 Bulk progress update: ${processed} records done...`);
+          await trackMusicFetchProgress();
+        }
+
+        await sleep(500); // Respect potential rate limits
+      } catch (err: any) {
+        console.error(`\n❌ Fatal error during run:`, err.message);
+        errors++;
+        if (err.message.includes('token')) break;
+      }
+    }
+
+    console.log('\n===============================');
+    console.log('✨ MusicFetch Enrichment Complete!');
+    console.log(`✅ Processed: ${processed}`);
+    console.log(`❌ Errors:    ${errors}`);
+    console.log('===============================\n');
+
+    await trackMusicFetchEnd(processed, errors);
+
+  } catch (error) {
+    console.error('❌ Fatal error:', error);
+    process.exit(1);
+  }
+}
+
+main();

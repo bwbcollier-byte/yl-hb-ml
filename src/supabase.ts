@@ -743,3 +743,82 @@ export async function getRoviStats() {
   }
 }
 
+/**
+ * Fetch artists needing MusicFetch enrichment
+ */
+export async function getArtistsForMusicFetchEnrichment(limit?: number) {
+  try {
+    console.log('⏳ Fetching artists for MusicFetch enrichment from Supabase...');
+
+    let query = supabase
+      .from('talent_profiles')
+      .select('id, spotify_id, name, mf_check')
+      .not('spotify_id', 'is', null)
+      .is('mf_check', null)
+      .limit(limit || 10000);
+
+    const { data, error } = await query;
+
+    if (error) {
+      throw new Error(`Failed to fetch artists for MusicFetch: ${error.message}`);
+    }
+
+    console.log(`✅ Found ${data?.length || 0} artists to MusicFetch-enrich`);
+    return data || [];
+  } catch (error: any) {
+    console.error('❌ Error in getArtistsForMusicFetchEnrichment:', error.message);
+    return [];
+  }
+}
+
+/**
+ * Update artist with MusicFetch data
+ */
+export async function updateArtistMusicFetchData(spotifyId: string, fields: Record<string, any>) {
+  try {
+    const { error } = await supabase
+      .from('talent_profiles')
+      .update(fields)
+      .eq('spotify_id', spotifyId);
+
+    if (error) {
+      throw new Error(`Failed to update MusicFetch data for ${spotifyId}: ${error.message}`);
+    }
+  } catch (error: any) {
+    console.error(`❌ Error updating MusicFetch data for ${spotifyId}:`, error.message);
+    throw error;
+  }
+}
+
+/**
+ * Get statistics for MusicFetch enrichment
+ */
+export async function getMusicFetchStats() {
+  try {
+    const { count: total, error: totalErr } = await supabase
+      .from('talent_profiles')
+      .select('*', { count: 'exact', head: true })
+      .not('spotify_id', 'is', null);
+
+    const { count: done, error: doneErr } = await supabase
+      .from('talent_profiles')
+      .select('*', { count: 'exact', head: true })
+      .not('spotify_id', 'is', null)
+      .is('mf_check', 'completed');
+
+    if (totalErr || doneErr) throw new Error('Failed to fetch counts');
+
+    const totalCount = total || 0;
+    const doneCount = done || 0;
+
+    return {
+      total: totalCount,
+      done: doneCount,
+      todo: Math.max(0, totalCount - doneCount)
+    };
+  } catch (error: any) {
+    console.error('❌ Error fetching MusicFetch stats:', error.message);
+    return { total: 0, done: 0, todo: 0 };
+  }
+}
+

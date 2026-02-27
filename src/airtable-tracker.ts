@@ -1,5 +1,5 @@
 import fetch from 'node-fetch';
-import { getSpotifyStats, getMusicBrainzStats, getAudioDBStats, getRoviStats } from './supabase';
+import { getSpotifyStats, getMusicBrainzStats, getAudioDBStats, getRoviStats, getMusicFetchStats } from './supabase';
 
 const AIRTABLE_API_KEY = process.env.AIRTABLE_API_KEY!;
 const AIRTABLE_BASE_ID = 'appvOK60xuHCw3Fdz';
@@ -264,3 +264,46 @@ export async function trackRoviProgress() {
     'Records Total': stats.total
   });
 }
+
+export async function trackMusicFetchStart() {
+  const stats = await getMusicFetchStats();
+  const startTime = new Date().toISOString();
+  const runLog = `Run started at ${startTime}`;
+
+  await updateAirtable('recPH9AiLEKanLZPn', {
+    'Records Todo': stats.todo,
+    'Records Done': stats.done,
+    'Records Total': stats.total,
+    'Run Status': 'In Progress 🔄',
+    'Run Details': runLog
+  });
+}
+
+export async function trackMusicFetchEnd(processed: number, errors: number) {
+  const stats = await getMusicFetchStats();
+  const endTime = new Date().toISOString();
+  const existingRecord = await fetch(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${AIRTABLE_TABLE_ID}/recPH9AiLEKanLZPn`, {
+    headers: { Authorization: `Bearer ${AIRTABLE_API_KEY}` }
+  }).then(r => r.json());
+
+  const existingDetails = existingRecord.fields?.['Run Details'] || '';
+  const completionLog = `Run completed at ${endTime}\nProcessed: ${processed}\nErrors: ${errors}`;
+
+  await updateAirtable('recPH9AiLEKanLZPn', {
+    'Records Todo': stats.todo,
+    'Records Done': stats.done,
+    'Records Total': stats.total,
+    'Run Status': 'Idle ✅',
+    'Run Details': `${completionLog}\n\n${existingDetails}`.trim()
+  });
+}
+
+export async function trackMusicFetchProgress() {
+  const stats = await getMusicFetchStats();
+  await updateAirtable('recPH9AiLEKanLZPn', {
+    'Records Todo': stats.todo,
+    'Records Done': stats.done,
+    'Records Total': stats.total
+  });
+}
+

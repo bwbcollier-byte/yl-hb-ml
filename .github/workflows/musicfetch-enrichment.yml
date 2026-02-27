@@ -1,0 +1,32 @@
+name: MusicFetch Artist Enrichment
+
+on:
+  schedule:
+    - cron: "0 6 * * *" # 6 AM UTC daily
+  workflow_dispatch: # Allows manual trigger
+
+jobs:
+  enrich:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: "18"
+          cache: "npm"
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Run MusicFetch Enrichment
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          AIRTABLE_API_KEY: ${{ secrets.AIRTABLE_API_KEY }}
+          MUSICFETCH_TOKEN: ${{ secrets.MUSICFETCH_TOKEN }}
+          LIMIT: 1000 # Default daily limit for automation
+          CI: true
+        run: npm run musicfetch
