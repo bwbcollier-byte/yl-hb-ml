@@ -15,6 +15,7 @@ on:
 jobs:
   enrich:
     runs-on: ubuntu-latest
+    timeout-minutes: 350 # Just under 6-hour GitHub limit
 
     steps:
       - name: Checkout code
@@ -39,14 +40,8 @@ jobs:
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           AIRTABLE_API_KEY: ${{ secrets.AIRTABLE_API_KEY }}
           LIMIT: ${{ github.event.inputs.record_limit }}
-        run: |
-          if [ -z "$LIMIT" ]; then
-            echo "Processing all pending artists..."
-            node dist/index.js <<< ""
-          else
-            echo "Processing $LIMIT artists..."
-            node dist/index.js <<< "$LIMIT"
-          fi
+          CI: "true"
+        run: node dist/index.js
 
       - name: Report status
         if: always()

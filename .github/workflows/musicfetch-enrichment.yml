@@ -9,22 +9,30 @@ on:
         description: "MusicFetch API Token (x-token)"
         required: false
         type: string
+      limit:
+        description: "Limit number of records (leave empty for all)"
+        required: false
+        default: ""
 
 jobs:
   enrich:
     runs-on: ubuntu-latest
+    timeout-minutes: 350
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: "18"
+          node-version: "20"
           cache: "npm"
 
       - name: Install Dependencies
-        run: npm install
+        run: npm ci
+
+      - name: Build TypeScript
+        run: npm run build
 
       - name: Run MusicFetch Enrichment
         env:
@@ -32,6 +40,15 @@ jobs:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           AIRTABLE_API_KEY: ${{ secrets.AIRTABLE_API_KEY }}
           MUSICFETCH_TOKEN: ${{ github.event.inputs.musicfetch_token || secrets.MUSICFETCH_TOKEN }}
-          LIMIT: 1000 # Default daily limit for automation
-          CI: true
-        run: npm run musicfetch
+          LIMIT: ${{ github.event.inputs.limit }}
+          CI: "true"
+        run: node dist/musicfetch-artist-enrichment.js
+
+      - name: Upload logs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: enrichment-logs
+          path: |
+            *.log
+          retention-days: 7

@@ -14,6 +14,7 @@ on:
 jobs:
   enrich:
     runs-on: ubuntu-latest
+    timeout-minutes: 350
 
     steps:
       - name: Checkout code
@@ -38,14 +39,8 @@ jobs:
           AUDIODB_API_KEY: ${{ secrets.AUDIODB_API_KEY }}
           AIRTABLE_API_KEY: ${{ secrets.AIRTABLE_API_KEY }}
           LIMIT: ${{ github.event.inputs.limit }}
-        run: |
-          if [ -z "$LIMIT" ]; then
-            echo "Processing all pending artists..."
-            node dist/audiodb-artist-enrichment.js <<< ""
-          else
-            echo "Processing $LIMIT artists..."
-            node dist/audiodb-artist-enrichment.js <<< "$LIMIT"
-          fi
+          CI: "true"
+        run: node dist/audiodb-artist-enrichment.js
 
       - name: Upload logs (on failure)
         if: failure()
