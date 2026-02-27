@@ -455,65 +455,6 @@ export async function upsertConcert(concertData: {
 }
 
 // ============================================================================
-// ADB (THEAUDIODB) FUNCTIONS
-// ============================================================================
-
-/**
- * Get artists that need ADB enrichment:
- * - adb_status is null, empty, or not 'Complete'/'Not Found'
- * - Has a name to search with
- */
-export async function getArtistsForAdbEnrichment(limit?: number) {
-  try {
-    console.log('⏳ Fetching artists for ADB enrichment from Supabase...');
-
-    let query = supabase
-      .from('talent_profiles')
-      .select('id, spotify_id, name, musicbrainz_id, adb_status, adb_updates')
-      .not('name', 'is', null)
-      .or('adb_status.is.null,adb_status.eq.,adb_status.eq.Error');
-
-    if (limit) {
-      query = query.limit(limit);
-    }
-
-    const { data, error } = await query;
-
-    if (error) {
-      throw new Error(`Failed to fetch artists for ADB: ${error.message}`);
-    }
-
-    console.log(`✅ Found ${data?.length || 0} artists to ADB-enrich`);
-    return data || [];
-  } catch (err: any) {
-    console.error('⚠️ ADB query error:', err.message);
-    return [];
-  }
-}
-
-/**
- * Update a talent_profiles row with ADB enrichment data
- */
-export async function updateArtistAdbData(
-  spotifyId: string,
-  adbFields: Record<string, any>
-) {
-  const { data, error } = await supabase
-    .from('talent_profiles')
-    .update({
-      ...adbFields,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('spotify_id', spotifyId);
-
-  if (error) {
-    throw new Error(`Failed to update ADB data for ${spotifyId}: ${error.message}`);
-  }
-
-  return data;
-}
-
-// ============================================================================
 // MUSICBRAINZ FUNCTIONS
 // ============================================================================
 

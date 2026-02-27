@@ -11,7 +11,6 @@ import {
 dotenv.config();
 
 // Configuration
-const AUDIODB_API_KEY = process.env.AUDIODB_API_KEY || '2';
 const ENV_LIMIT = process.env.LIMIT ? parseInt(process.env.LIMIT) : undefined;
 
 /**
@@ -109,13 +108,6 @@ interface MusicBrainzArtist {
   }>;
 }
 
-interface AudioDBArtist {
-  idArtist: string;
-  strArtist: string;
-  strBiographyEN?: string;
-  strArtistThumb?: string;
-}
-
 // ============================================================================
 // API FETCHERS
 // ============================================================================
@@ -146,30 +138,6 @@ async function fetchMusicBrainzArtist(mbid: string): Promise<MusicBrainzArtist |
     return data;
   } catch (error) {
     console.error(`  ❌ Error fetching MusicBrainz data:`, error);
-    return null;
-  }
-}
-
-async function fetchAudioDBArtist(mbid: string): Promise<AudioDBArtist | null> {
-  try {
-    const url = `https://www.theaudiodb.com/api/v1/json/${AUDIODB_API_KEY}/artist-mb.php?i=${mbid}`;
-
-    console.log(`  🎵 Fetching TheAudioDB data...`);
-
-    const response = await fetch(url);
-
-    if (!response.ok) {
-      console.log(`  ⚠️  TheAudioDB API error: ${response.status} (may require premium key)`);
-      return null;
-    }
-
-    const data = await response.json() as { artists: AudioDBArtist[] | null };
-
-    await sleep(500);
-
-    return data.artists?.[0] || null;
-  } catch (error) {
-    console.error(`  ❌ Error fetching TheAudioDB data:`, error);
     return null;
   }
 }
@@ -514,14 +482,6 @@ async function enrichArtist(artist: any): Promise<void> {
     return;
   }
 
-  // Optionally fetch TheAudioDB for bio + avatar
-  const audioData = await fetchAudioDBArtist(mbid);
-  if (audioData) {
-    console.log(`  ✅ TheAudioDB data found`);
-  } else {
-    console.log(`  ℹ️  No TheAudioDB data (may require premium API key)`);
-  }
-
   // Extract social URLs
   const socialUrls = extractSocialUrls(mbData.relations);
   console.log(`  🔗 Social URLs extracted: ${Object.keys(socialUrls).length}`);
@@ -588,10 +548,6 @@ async function enrichArtist(artist: any): Promise<void> {
   if (relationships.members.length > 0) updateFields.mb_members = relationships.members.join(', ');
   if (relationships.associated.length > 0) updateFields.mb_associated = relationships.associated.join(', ');
   if (relationships.collaborators.length > 0) updateFields.mb_collaborators = relationships.collaborators.join(', ');
-
-  // TheAudioDB supplemental fields
-  if (audioData?.strBiographyEN) updateFields.mb_bio = audioData.strBiographyEN;
-  if (audioData?.strArtistThumb) updateFields.mb_avatar_url = audioData.strArtistThumb;
 
   // Social URLs — only update fields that are currently empty in the existing row
   for (const [col, url] of Object.entries(socialUrls)) {

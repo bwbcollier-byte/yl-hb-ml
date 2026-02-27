@@ -1,11 +1,10 @@
 {
   "name": "hb-data-musicartists",
   "version": "1.0.0",
-  "description": "Consolidated music artist enrichment with Spotify, TheAudioDB, and MusicBrainz",
+  "description": "Consolidated music artist enrichment with Spotify and MusicBrainz",
   "main": "dist/index.js",
   "scripts": {
     "start": "ts-node src/index.ts",
-    "adb": "ts-node src/adb-artist-enrichment.ts",
     "musicbrainz": "ts-node src/musicbrainz-artist-enrichment.ts",
     "build": "tsc",
     "dev": "ts-node src/index.ts"
