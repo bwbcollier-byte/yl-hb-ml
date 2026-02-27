@@ -201,20 +201,31 @@ export async function updateArtistConcertCount(spotifyId: string, count: string 
  * Get stats for Spotify enrichment progress
  */
 export async function getSpotifyStats() {
-  const { count: total } = await supabase
-    .from('talent_profiles')
-    .select('*', { count: 'exact', head: true })
-    .not('spotify_id', 'is', null);
+  try {
+    const { count: total, error: err1 } = await supabase
+      .from('talent_profiles')
+      .select('id', { count: 'exact', head: true })
+      .not('spotify_id', 'is', null);
 
-  const { count: todo } = await supabase
-    .from('talent_profiles')
-    .select('*', { count: 'exact', head: true })
-    .not('spotify_id', 'is', null)
-    .is('sp_check', null);
+    if (err1) throw err1;
 
-  const done = (total || 0) - (todo || 0);
+    const { count: todo, error: err2 } = await supabase
+      .from('talent_profiles')
+      .select('id', { count: 'exact', head: true })
+      .not('spotify_id', 'is', null)
+      .is('sp_check', null);
 
-  return { todo: todo || 0, done, total: total || 0 };
+    if (err2) throw err2;
+
+    const totalVal = total || 0;
+    const todoVal = todo || 0;
+    const done = totalVal - todoVal;
+
+    return { todo: todoVal, done, total: totalVal };
+  } catch (err: any) {
+    console.error(`⚠️ Spotify stats error: ${err.message || JSON.stringify(err)}`);
+    return { todo: 0, done: 0, total: 0 };
+  }
 }
 
 // ============================================================================
@@ -536,20 +547,31 @@ export async function updateArtistMusicBrainzData(
  * Get stats for MusicBrainz enrichment progress
  */
 export async function getMusicBrainzStats() {
-  const { count: total } = await supabase
-    .from('talent_profiles')
-    .select('id', { count: 'exact', head: true })
-    .not('musicbrainz_id', 'is', null);
+  try {
+    const { count: total, error: err1 } = await supabase
+      .from('talent_profiles')
+      .select('id', { count: 'exact', head: true })
+      .not('musicbrainz_id', 'is', null);
 
-  const { count: todo } = await supabase
-    .from('talent_profiles')
-    .select('id', { count: 'exact', head: true })
-    .not('musicbrainz_id', 'is', null)
-    .is('mb_check', null);
+    if (err1) throw err1;
 
-  const done = (total || 0) - (todo || 0);
+    const { count: todo, error: err2 } = await supabase
+      .from('talent_profiles')
+      .select('id', { count: 'exact', head: true })
+      .not('musicbrainz_id', 'is', null)
+      .is('mb_check', null);
 
-  return { todo: todo || 0, done, total: total || 0 };
+    if (err2) throw err2;
+
+    const totalVal = total || 0;
+    const todoVal = todo || 0;
+    const done = totalVal - todoVal;
+
+    return { todo: todoVal, done, total: totalVal };
+  } catch (err: any) {
+    console.error(`⚠️ MusicBrainz stats error: ${err.message || JSON.stringify(err)}`);
+    return { todo: 0, done: 0, total: 0 };
+  }
 }
 
 // ============================================================================
@@ -637,7 +659,7 @@ export async function getAudioDBStats() {
 
     return { todo: todoVal, done, total: totalVal };
   } catch (err: any) {
-    console.error('⚠️ AudioDB stats error:', err.message);
+    console.error(`⚠️ AudioDB stats error: ${err.message || JSON.stringify(err)}`);
     return { todo: 0, done: 0, total: 0 };
   }
 }
@@ -728,7 +750,7 @@ export async function getRoviStats() {
 
     return { todo: todoVal, done, total: totalVal };
   } catch (err: any) {
-    console.error('⚠️ Rovi stats error:', err.message);
+    console.error(`⚠️ Rovi stats error: ${err.message || JSON.stringify(err)}`);
     return { todo: 0, done: 0, total: 0 };
   }
 }
