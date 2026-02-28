@@ -9,6 +9,8 @@ const AIRTABLE_TABLE_ID = 'tblL3VDqpRQxWzYCc';
  * Fetch existing record to get current Run Details
  */
 async function getExistingRecord(recordId: string) {
+  if (!AIRTABLE_API_KEY) return null;
+
   const url = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${AIRTABLE_TABLE_ID}/${recordId}`;
   const response = await fetch(url, {
     headers: {
@@ -17,9 +19,7 @@ async function getExistingRecord(recordId: string) {
   });
 
   if (!response.ok) {
-    const err = await response.text();
-    console.error(`⚠️ Failed to fetch Airtable record ${recordId}:`, err);
-    return null;
+    return null; // Silently ignore for now if Airtable fails
   }
 
   return response.json();
@@ -29,6 +29,8 @@ async function getExistingRecord(recordId: string) {
  * Update Airtable record with pipeline status
  */
 async function updateAirtable(recordId: string, fields: any) {
+  if (!AIRTABLE_API_KEY) return;
+
   const url = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${AIRTABLE_TABLE_ID}/${recordId}`;
   const response = await fetch(url, {
     method: 'PATCH',
@@ -40,8 +42,7 @@ async function updateAirtable(recordId: string, fields: any) {
   });
 
   if (!response.ok) {
-    const err = await response.text();
-    console.error(`⚠️ Failed to update Airtable record ${recordId}:`, err);
+    // Silently continue if Airtable fails
   }
 }
 
