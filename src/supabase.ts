@@ -729,18 +729,26 @@ export async function updateArtistRoviData(
 export async function updateArtistRoviDataBatch(updatesArray: Record<string, any>[]) {
   if (updatesArray.length === 0) return;
 
-  const { error } = await supabase
-    .from('talent_profiles')
-    .upsert(
-      updatesArray.map(u => ({
-        ...u,
-        updated_at: new Date().toISOString(),
-      })),
-      { onConflict: 'spotify_id' }
-    );
+  // Since spotify_id does not have a unique constraint, we cannot use bulk upsert
+  // We perform concurrent update requests instead, chunking slightly to respect connections
+  for (let i = 0; i < updatesArray.length; i += 20) {
+    const chunk = updatesArray.slice(i, i + 20);
+    const promises = chunk.map(u => {
+      const { spotify_id, ...fields } = u;
+      return supabase
+        .from('talent_profiles')
+        .update({
+          ...fields,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('spotify_id', spotify_id);
+    });
 
-  if (error) {
-    throw new Error(`Failed to batch update artist Rovi data: ${error.message}`);
+    const results = await Promise.all(promises);
+    const errors = results.filter(r => r.error);
+    if (errors.length > 0) {
+      throw new Error(`Failed to batch update artist Rovi data: ${errors[0].error?.message}`);
+    }
   }
 }
 
@@ -816,18 +824,24 @@ export async function getArtistsForMusicFetchEnrichment(limit?: number) {
 export async function updateArtistMusicFetchDataBatch(updatesArray: Record<string, any>[]) {
   if (updatesArray.length === 0) return;
 
-  const { error } = await supabase
-    .from('talent_profiles')
-    .upsert(
-      updatesArray.map(u => ({
-        ...u,
-        updated_at: new Date().toISOString(),
-      })),
-      { onConflict: 'spotify_id' }
-    );
+  for (let i = 0; i < updatesArray.length; i += 20) {
+    const chunk = updatesArray.slice(i, i + 20);
+    const promises = chunk.map(u => {
+      const { spotify_id, ...fields } = u;
+      return supabase
+        .from('talent_profiles')
+        .update({
+          ...fields,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('spotify_id', spotify_id);
+    });
 
-  if (error) {
-    throw new Error(`Failed to batch update artist MusicFetch data: ${error.message}`);
+    const results = await Promise.all(promises);
+    const errors = results.filter(r => r.error);
+    if (errors.length > 0) {
+      throw new Error(`Failed to batch update artist MusicFetch data: ${errors[0].error?.message}`);
+    }
   }
 }
 
