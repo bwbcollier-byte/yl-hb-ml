@@ -48,6 +48,16 @@ function promptForLimit(): Promise<number | undefined> {
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+function extractId(urlOrId: string | null | undefined): string | null {
+  if (!urlOrId) return null;
+  // If it's a full URL, split by / and grab the last part
+  if (urlOrId.includes('/')) {
+    const parts = urlOrId.split('/').filter(p => p.trim() !== '');
+    return parts[parts.length - 1];
+  }
+  return urlOrId;
+}
+
 /**
  * Build the query URL based on available IDs
  */
@@ -55,23 +65,25 @@ function buildRoviUrl(artist: any) {
   const params = new URLSearchParams();
   params.set('includeAllFields', 'true');
 
-  // Priority 1: nameId (MN...)
-  if (artist.social_allmusic_id?.startsWith('MN')) {
-    params.set('nameId', artist.social_allmusic_id);
-  } 
-  // Priority 2: amgPopId (P...)
-  else if (artist.social_allmusic_id?.startsWith('P') || artist.amg_pop_id) {
-    params.set('amgPopId', artist.social_allmusic_id || artist.amg_pop_id);
-  }
-  // Priority 3: amgClassicId (Q...)
-  else if (artist.social_allmusic_id?.startsWith('Q') || artist.amg_classic_id) {
-    params.set('amgClassicId', artist.social_allmusic_id || artist.amg_classic_id);
-  }
-  // Priority 4: appleAdamId
-  else if (artist.social_apple_music_id) {
-    // If it's a full URL, extract the ID
-    const appleId = artist.social_apple_music_id.match(/id(\d+)/)?.[1] || artist.social_apple_music_id;
-    params.set('appleAdamId', appleId);
+  const allmusicId = extractId(artist.social_allmusic_id);
+  const appleMusicId = extractId(artist.social_apple_music_id);
+  const amgPopId = extractId(artist.amg_pop_id);
+  const amgClassicId = extractId(artist.amg_classic_id);
+
+  if (allmusicId && allmusicId.startsWith('mn')) {
+    params.set('nameId', allmusicId.toUpperCase());
+  } else if (allmusicId && allmusicId.startsWith('MN')) {
+    params.set('nameId', allmusicId);
+  } else if (amgPopId || (allmusicId && allmusicId.startsWith('p'))) {
+    params.set('amgPopId', amgPopId || allmusicId!);
+  } else if (amgClassicId || (allmusicId && allmusicId.startsWith('q'))) {
+    params.set('amgClassicId', amgClassicId || allmusicId!);
+  } else if (appleMusicId) {
+    const appleIdMatch = appleMusicId.match(/id(\d+)/);
+    params.set('appleAdamId', appleIdMatch ? appleIdMatch[1] : appleMusicId);
+  } else if (allmusicId) {
+    // Fallback if it's just a raw ID without prefix
+    params.set('nameId', allmusicId);
   }
 
   if (Array.from(params.keys()).length <= 1) return null; // Only includeAllFields set
