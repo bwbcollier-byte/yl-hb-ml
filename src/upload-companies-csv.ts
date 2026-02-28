@@ -4,6 +4,7 @@ import { supabase } from './supabase';
 import readline from 'readline';
 
 // Script to upload IMDb Companies Grid view CSV to crm_companies table in Supabase
+// Optimized to avoid Foreign Key violations by checking existence and only updating non-key fields
 
 async function processCSV(filePath: string) {
   if (!fs.existsSync(filePath)) {
@@ -28,14 +29,13 @@ async function processCSV(filePath: string) {
   let totalUpserted = 0;
   let totalErrors = 0;
   
-  const batchSize = 100; // Smaller batches for safety
+  const batchSize = 100;
   
   for (let i = 0; i < results.length; i += batchSize) {
     const batch = results.slice(i, i + batchSize);
-    console.log(`\n💾 Batch uploading records ${i + 1} to ${Math.min(i + batchSize, results.length)}...`);
+    console.log(`\n💾 Processing records ${i + 1} to ${Math.min(i + batchSize, results.length)}...`);
     
     const mappedBatch = batch.map((row) => {
-      // Map CSV keys (which might contain dots) to database keys
       return {
         name: row['Name'] || row['name'],
         identifier: row['id.roster'] || row['Identifier'] || row['identifier'],
@@ -69,43 +69,78 @@ async function processCSV(filePath: string) {
         xcheck_web: row['xcheck_web'],
         updated_at: new Date().toISOString()
       };
-    }).filter(record => record.identifier || record.atid || record.id_imdb); // Skip empty rows
+    }).filter(record => record.atid);
 
     if (mappedBatch.length === 0) continue;
 
-    // Use identifier or atid as conflict key
-    let conflictKey = 'identifier';
-    // If the data mostly has atid, we might want to use that.
-    // For now, identifier seems the safest primary slug.
-    
-    const { error } = await supabase
+    // 1. Find which of these ATIDs already exist in the DB
+    const atids = mappedBatch.map(r => r.atid);
+    const { data: existingRecords, error: fetchError } = await supabase
       .from('crm_companies')
-      .upsert(mappedBatch, {
-         onConflict: 'atid' // This will update if Airtable ID matches
+      .select('atid, identifier')
+      .in('atid', atids);
+
+    if (fetchError) {
+      console.error(`❌ Error fetching existing records:`, fetchError.message);
+      totalErrors += mappedBatch.length;
+      continue;
+    }
+
+    const existingAtids = new Set(existingRecords?.map(r => r.atid) || []);
+    
+    // 2. Split batch into "New" and "Existing"
+    const newRecords = mappedBatch.filter(r => !existingAtids.has(r.atid));
+    const updateRecords = mappedBatch.filter(r => existingAtids.has(r.atid));
+
+    // 3. Process New Records (Insert including identifier)
+    if (newRecords.length > 0) {
+      console.log(`   🆕 Inserting ${newRecords.length} new companies...`);
+      const { error: insertError } = await supabase
+        .from('crm_companies')
+        .insert(newRecords);
+      
+      if (insertError) {
+        console.error(`   ❌ Insert error:`, insertError.message);
+        totalErrors += newRecords.length;
+      } else {
+        totalUpserted += newRecords.length;
+      }
+    }
+
+    // 4. Process Existing Records (Update EXCLUDING identifier to avoid FK violation)
+    if (updateRecords.length > 0) {
+      console.log(`   🔄 Updating ${updateRecords.length} existing companies (protecting identifiers)...`);
+      
+      // We process updates concurrently in small chunks to be fast
+      const updatePromises = updateRecords.map(async (record) => {
+        const { identifier, atid, ...fieldsToUpdate } = record;
+        const { error: updateError } = await supabase
+          .from('crm_companies')
+          .update(fieldsToUpdate)
+          .eq('atid', atid);
+        
+        if (updateError) {
+          console.error(`     ❌ Update error for ${record.name}:`, updateError.message);
+          return false;
+        }
+        return true;
       });
 
-    if (error) {
-      console.error(`❌ Batch error:`, error.message);
-      // Attempt 1-by-1 if batch fails, to identify bad rows
-      console.log('Falling back to individual updates for this batch...');
-      for (const item of mappedBatch) {
-          if (!item.atid) continue;
-          const { error: singleError } = await supabase
-          .from('crm_companies')
-          .upsert(item, { onConflict: 'atid' });
-          if (singleError) totalErrors++;
-          else totalUpserted++;
-      }
-    } else {
-      console.log(`   ✅ Successful Upsert`);
-      totalUpserted += mappedBatch.length;
+      const results = await Promise.all(updatePromises);
+      const successCount = results.filter(r => r === true).length;
+      const failCount = results.length - successCount;
+      
+      totalUpserted += successCount;
+      totalErrors += failCount;
     }
+
+    console.log(`   ✅ Current Progress: ${totalUpserted} success, ${totalErrors} errors`);
   }
 
   console.log(`\n==========================================`);
   console.log(`✨ Upload Complete!`);
-  console.log(`✅ Total Upserted: ${totalUpserted}`);
-  console.log(`❌ Total Errors:   ${totalErrors}`);
+  console.log(`✅ Total Successfully Processed: ${totalUpserted}`);
+  console.log(`❌ Total Errors Encountered:      ${totalErrors}`);
   console.log(`==========================================\n`);
 }
 
