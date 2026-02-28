@@ -3,7 +3,8 @@ import fetch from 'node-fetch';
 import readline from 'readline';
 import {
   getArtistsForRoviEnrichment,
-  updateArtistRoviData
+  updateArtistRoviData,
+  updateArtistRoviDataBatch
 } from './supabase';
 import { trackRoviStart, trackRoviEnd, trackRoviProgress } from './airtable-tracker';
 
@@ -129,8 +130,7 @@ async function enrichArtist(artist: any) {
   const url = buildRoviUrl(artist);
   if (!url) {
     console.log(`   ⚠️ No valid Rovi identifier found for ${artist.name}`);
-    await updateArtistRoviData(artist.spotify_id, { rovi_check: 'no_id' });
-    return;
+    return { spotify_id: artist.spotify_id, rovi_check: 'no_id' };
   }
 
   console.log(`   🔍 Fetching Rovi data...`);
@@ -145,13 +145,11 @@ async function enrichArtist(artist: any) {
 
   if (!hit) {
     console.log(`   ⚠️ No data found in Rovi for ${artist.name}`);
-    await updateArtistRoviData(artist.spotify_id, { rovi_check: 'no_data' });
-    return;
+    return { spotify_id: artist.spotify_id, rovi_check: 'no_data' };
   }
 
   const updateFields = mapRoviData(hit);
-  await updateArtistRoviData(artist.spotify_id, updateFields);
-  console.log(`   ✅ Saved Rovi fields to Supabase`);
+  return { spotify_id: artist.spotify_id, ...updateFields };
 }
 
 async function main() {
@@ -183,14 +181,29 @@ async function main() {
 
       console.log(`\n📦 Fetching next batch of ${artists.length} artists...`);
 
+      let currentBatch: any[] = [];
+
       for (const artist of artists) {
         try {
-          await enrichArtist(artist);
+          const update = await enrichArtist(artist);
+          if (update) {
+            currentBatch.push(update);
+            
+            // Console log to match 
+            if (update.rovi_check === 'completed') {
+              console.log(`   ✅ Buffered Rovi fields for batch save`);
+            }
+          }
+
           totalProcessed++;
 
-          // Update progress every 100 records
-          if (totalProcessed > 0 && totalProcessed % 100 === 0) {
-            console.log(`\n📊 Bulk progress update: ${totalProcessed} records done...`);
+          // Update progress and save every 100 records
+          if (currentBatch.length >= 100) {
+            console.log(`\n💾 Batch saving ${currentBatch.length} records to Supabase...`);
+            await updateArtistRoviDataBatch(currentBatch);
+            currentBatch = [];
+            
+            console.log(`📊 Bulk progress update: ${totalProcessed} records done...`);
             await trackRoviProgress();
           }
 
@@ -201,6 +214,13 @@ async function main() {
           console.error(`\n❌ Error processing ${artist.name}:`, err.message);
           totalErrors++;
         }
+      }
+      
+      // Flush remaining items
+      if (currentBatch.length > 0) {
+        console.log(`\n💾 Catch-up batch saving ${currentBatch.length} records to Supabase...`);
+        await updateArtistRoviDataBatch(currentBatch);
+        currentBatch = [];
       }
 
       if (limit && totalProcessed >= limit) break;

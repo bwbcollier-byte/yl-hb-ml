@@ -726,6 +726,24 @@ export async function updateArtistRoviData(
   return data;
 }
 
+export async function updateArtistRoviDataBatch(updatesArray: Record<string, any>[]) {
+  if (updatesArray.length === 0) return;
+
+  const { error } = await supabase
+    .from('talent_profiles')
+    .upsert(
+      updatesArray.map(u => ({
+        ...u,
+        updated_at: new Date().toISOString(),
+      })),
+      { onConflict: 'spotify_id' }
+    );
+
+  if (error) {
+    throw new Error(`Failed to batch update artist Rovi data: ${error.message}`);
+  }
+}
+
 /**
  * Get stats for Rovi enrichment progress
  */
