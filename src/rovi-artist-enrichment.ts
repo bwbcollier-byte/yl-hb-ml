@@ -200,8 +200,11 @@ async function main() {
           // Update progress and save every 100 records
           if (currentBatch.length >= 100) {
             console.log(`\n💾 Batch saving ${currentBatch.length} records to Supabase...`);
-            await updateArtistRoviDataBatch(currentBatch);
-            currentBatch = [];
+            try {
+              await updateArtistRoviDataBatch(currentBatch);
+            } finally {
+              currentBatch = [];
+            }
             
             console.log(`📊 Bulk progress update: ${totalProcessed} records done...`);
             await trackRoviProgress();

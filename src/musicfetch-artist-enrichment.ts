@@ -244,8 +244,11 @@ async function main() {
           // Update progress and save to database every 100 records
           if (currentBatch.length >= 100) {
             console.log(`\n💾 Batch saving ${currentBatch.length} records to Supabase...`);
-            await updateArtistMusicFetchDataBatch(currentBatch);
-            currentBatch = []; // Reset batch
+            try {
+              await updateArtistMusicFetchDataBatch(currentBatch);
+            } finally {
+              currentBatch = []; // Always reset batch, even on error
+            }
             
             console.log(`📊 Bulk progress update: ${totalProcessed} records done...`);
             await trackMusicFetchProgress();
