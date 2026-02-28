@@ -795,6 +795,24 @@ export async function getArtistsForMusicFetchEnrichment(limit?: number) {
   }
 }
 
+export async function updateArtistMusicFetchDataBatch(updatesArray: Record<string, any>[]) {
+  if (updatesArray.length === 0) return;
+
+  const { error } = await supabase
+    .from('talent_profiles')
+    .upsert(
+      updatesArray.map(u => ({
+        ...u,
+        updated_at: new Date().toISOString(),
+      })),
+      { onConflict: 'spotify_id' }
+    );
+
+  if (error) {
+    throw new Error(`Failed to batch update artist MusicFetch data: ${error.message}`);
+  }
+}
+
 /**
  * Update artist with MusicFetch data
  */

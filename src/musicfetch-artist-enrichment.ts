@@ -3,7 +3,8 @@ import fetch from 'node-fetch';
 import readline from 'readline';
 import {
   getArtistsForMusicFetchEnrichment,
-  updateArtistMusicFetchData
+  updateArtistMusicFetchData,
+  updateArtistMusicFetchDataBatch
 } from './supabase';
 import { trackMusicFetchStart, trackMusicFetchEnd, trackMusicFetchProgress } from './airtable-tracker';
 
@@ -183,13 +184,11 @@ async function enrichArtist(artist: any, token: string) {
       updateFields.musicbrainz_id = parts[parts.length - 1];
     }
 
-    await updateArtistMusicFetchData(artist.spotify_id, updateFields);
-    console.log(`   ✅ Saved MusicFetch fields and ${Object.keys(socialMap).length} social links`);
+    return { spotify_id: artist.spotify_id, ...updateFields };
 
   } catch (err: any) {
-    console.error(`   ❌ Error: ${err.message}`);
     if (err.message.includes('token')) throw err; // Fatal
-    await updateArtistMusicFetchData(artist.spotify_id, { mf_check: `error: ${err.message}` });
+    return { spotify_id: artist.spotify_id, mf_check: `error: ${err.message}` };
   }
 }
 
@@ -224,14 +223,31 @@ async function main() {
 
       console.log(`\n📦 Fetching next batch of ${artists.length} artists...`);
 
+      let currentBatch: any[] = [];
+
       for (const artist of artists) {
         try {
-          await enrichArtist(artist, token);
+          const update = await enrichArtist(artist, token);
+          if (update) {
+            currentBatch.push(update);
+            
+            // Wait, also log if we got success 
+            if (update.mf_check === 'completed' && (update as any).mf_socials !== undefined) {
+               console.log(`   ✅ Buffered fields and social links for batch save`);
+            } else if (update.mf_check && update.mf_check.includes('error')) {
+               console.error(`   ❌ Buffered error: ${update.mf_check.replace('error: ', '')}`);
+            }
+          }
+          
           totalProcessed++;
 
-          // Update progress every 100 records
-          if (totalProcessed > 0 && totalProcessed % 100 === 0) {
-            console.log(`\n📊 Bulk progress update: ${totalProcessed} records done...`);
+          // Update progress and save to database every 100 records
+          if (currentBatch.length >= 100) {
+            console.log(`\n💾 Batch saving ${currentBatch.length} records to Supabase...`);
+            await updateArtistMusicFetchDataBatch(currentBatch);
+            currentBatch = []; // Reset batch
+            
+            console.log(`📊 Bulk progress update: ${totalProcessed} records done...`);
             await trackMusicFetchProgress();
           }
 
@@ -243,6 +259,13 @@ async function main() {
           totalErrors++;
           if (err.message.includes('token')) break;
         }
+      }
+      
+      // Save any remaining in the current batch
+      if (currentBatch.length > 0) {
+          console.log(`\n💾 Catch-up batch saving ${currentBatch.length} records to Supabase...`);
+          await updateArtistMusicFetchDataBatch(currentBatch);
+          currentBatch = [];
       }
 
       if (limit && totalProcessed >= limit) break;
