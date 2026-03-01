@@ -47,7 +47,6 @@ async function processCSV(filePath: string) {
         airtable_id: atid,
         name: row[nameKey],
         imdb_id: row['imdb_id'],
-        id_imdb: row['imdb_id'], // Compatibility column if needed
         tmdb_id: row['tmdb_id'],
         tmdb_about: row['tmdb_about'],
         tmdb_image: row['tmdb_image'],
