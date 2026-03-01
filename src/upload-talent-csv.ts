@@ -37,13 +37,17 @@ async function processCSV(filePath: string) {
     
     // Map CSV keys to database keys
     const mappedBatch = batch.map((row) => {
-      // Clean up the Xatid header which sometimes has a trailing parenthesis in Airtable exports
-      const atid = row['Xatid)'] || row['Xatid'] || row['atid'];
+      // Find the name key even if it has a Byte Order Mark (BOM) or is capitalized
+      const nameKey = Object.keys(row).find(k => k.toLowerCase().includes('name')) || 'name';
+      const atidKey = Object.keys(row).find(k => k.toLowerCase().includes('xatid')) || 'Xatid';
+      
+      const atid = row[atidKey] || row['airtable_id'];
       
       return {
         airtable_id: atid,
-        name: row['name'],
+        name: row[nameKey],
         imdb_id: row['imdb_id'],
+        id_imdb: row['imdb_id'], // Compatibility column if needed
         tmdb_id: row['tmdb_id'],
         tmdb_about: row['tmdb_about'],
         tmdb_image: row['tmdb_image'],
