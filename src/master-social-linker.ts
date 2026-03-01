@@ -46,7 +46,7 @@ async function processBatch() {
         .limit(BATCH_SIZE);
 
     if (error) {
-        console.error('❌ Error fetching socials:', error.message);
+        console.error('\n❌ Error fetching socials:', error.message);
         return 0;
     }
 
@@ -80,7 +80,7 @@ async function processBatch() {
             .upsert(talentUpdateArray);
 
         if (talentError) {
-            console.error('❌ Error updating talent records:', talentError.message);
+            console.error('\n❌ Error updating talent records:', talentError.message);
             return 0;
         }
     }
@@ -97,7 +97,7 @@ async function processBatch() {
             .in('id', chunk);
 
         if (socialError) {
-            console.error('❌ Error updating social status chunk:', socialError.message);
+            console.error('\n❌ Error updating social status chunk:', socialError.message);
         } else {
             updatedCount += chunk.length;
         }
@@ -108,15 +108,32 @@ async function processBatch() {
 
 async function startLinking() {
     console.log('🚀 Starting Comprehensive Social Linking...');
-    let totalProcessed = 0;
+    
+    // Get the initial count of remaining unlinked records
+    const { count: initialRemaining } = await supabase
+        .from('social_profiles')
+        .select('id', { count: 'exact', head: true })
+        .is('linking_status', null);
+        
+    const originalTotal = 2128475; // Total records in your migration
+    
+    let totalProcessedThisSession = 0;
     let consecutiveErrors = 0;
+
+    console.log(`📊 Initial State: ${initialRemaining} records remaining out of ${originalTotal} total.`);
 
     while (true) {
         const count = await processBatch();
         
         if (count > 0) {
-            totalProcessed += count;
-            process.stdout.write(`\r   📊 LinkedIn ${totalProcessed} social profiles out of 2.1M...`);
+            totalProcessedThisSession += count;
+            
+            // Calculate current remaining and percentage
+            const currentRemaining = Math.max(0, (initialRemaining || 0) - totalProcessedThisSession);
+            const totalDone = originalTotal - currentRemaining;
+            const percentComplete = ((totalDone / originalTotal) * 100).toFixed(2);
+            
+            process.stdout.write(`\r   📊 Linking: Current Batch: ${totalProcessedThisSession} | Total Database Progress: ${percentComplete}% (${totalDone}/${originalTotal} Done. ${currentRemaining} Left)`);
             consecutiveErrors = 0;
         } else if (count === 0) {
             const { count: remaining } = await supabase
