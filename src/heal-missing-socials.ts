@@ -145,7 +145,7 @@ async function startHealer() {
     // Get total remaining un-checked out of the 1,429,010 total records
     const { count: initialRemaining } = await supabase
         .from('talent_profiles')
-        .select('id', { count: 'exact', head: true })
+        .select('id', { count: 'estimated', head: true })
         .is('linked_records_check', null);
 
     const originalTotal = 1429010; 
@@ -168,7 +168,7 @@ async function startHealer() {
         } else if (count === 0) {
             const { count: remaining } = await supabase
                 .from('talent_profiles')
-                .select('id', { count: 'exact', head: true })
+                .select('id', { count: 'estimated', head: true })
                 .is('linked_records_check', null);
             
             if (remaining === 0) {
