@@ -126,7 +126,7 @@ async function processBatch() {
     const talentUpdateArray = Object.values(internalProfileLinks);
 
     // To prevent "URI Too long" or timeout from upserting large payloads, chunk it
-    const CHUNK = 200;
+    const CHUNK = 50;
     for (let i = 0; i < talentUpdateArray.length; i += CHUNK) {
         const chunk = talentUpdateArray.slice(i, i + CHUNK);
         const { error: updateError } = await supabase.from('talent_profiles').upsert(chunk);
