@@ -8,7 +8,7 @@ import { supabase } from './supabase';
  * Creates any missing social_profiles and links them back via soc_ UUID columns.
  */
 
-const BATCH_SIZE = 500; // Optimal batch size for processing 23 dynamic columns on 1.4M rows
+const BATCH_SIZE = 250; // Optimal batch size for processing 23 dynamic columns on 1.4M rows
 
 const PLATFORMS = [
     { type: 'Spotify', legacyField: 'spotify_id', linkField: 'soc_spotify', kind: 'id' },
@@ -92,20 +92,28 @@ async function processBatch() {
 
     // 3. Create social profile records in bulk (if any were missing)
     if (newSocialsToInsert.length > 0) {
-        // To avoid HUGE header requests, split inserts if necessary, though 500*20 max shouldn't regularly hit limit
-        const { data: inserted, error: insertError } = await supabase
-            .from('social_profiles')
-            .insert(newSocialsToInsert)
-            .select('id, talent_id, social_type');
+        const INSERT_CHUNK = 100;
+        let allInserted: any[] = [];
+        
+        for (let i = 0; i < newSocialsToInsert.length; i += INSERT_CHUNK) {
+            const chunkToInsert = newSocialsToInsert.slice(i, i + INSERT_CHUNK);
+            const { data: inserted, error: insertError } = await supabase
+                .from('social_profiles')
+                .insert(chunkToInsert)
+                .select('id, talent_id, social_type');
 
-        if (insertError) {
-            console.error('\n❌ Error inserting missing social profiles:', insertError.message);
-            return 0;
+            if (insertError) {
+                console.error('\n❌ Error inserting missing social profiles:', insertError.message);
+                return 0;
+            }
+            if (inserted) {
+                allInserted = allInserted.concat(inserted);
+            }
         }
 
-        if (inserted) {
+        if (allInserted.length > 0) {
             // Map the newly generated UUIDs back to the corresponding talent profile object
-            for (const row of inserted) {
+            for (const row of allInserted) {
                 const platform = PLATFORMS.find(pl => pl.type === row.social_type);
                 if (platform) {
                     internalProfileLinks[row.talent_id][platform.linkField] = row.id;
