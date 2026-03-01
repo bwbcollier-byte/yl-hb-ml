@@ -1,14 +1,14 @@
 import { supabase } from './supabase';
 
 /**
- * SOCIAL HEALER (Missing Link Creator)
+ * MASTER SOCIAL HEALER (Row-by-Row Iterator)
  * 
- * If talent_profiles has a legacy field populated (like 'social_deezer') 
- * BUT the direct link ('soc_deezer') is empty, this script creates the 
- * missing social_profile and links it back.
+ * Iterates through talent_profiles using 'linked_records_check'.
+ * Checks all 23 legacy fields.
+ * Creates any missing social_profiles and links them back via soc_ UUID columns.
  */
 
-const BATCH_SIZE = 1000;
+const BATCH_SIZE = 500; // Optimal batch size for processing 23 dynamic columns on 1.4M rows
 
 const PLATFORMS = [
     { type: 'Spotify', legacyField: 'spotify_id', linkField: 'soc_spotify', kind: 'id' },
@@ -18,7 +18,7 @@ const PLATFORMS = [
     { type: 'Facebook', legacyField: 'social_facebook', linkField: 'soc_facebook', kind: 'url' },
     { type: 'Twitter', legacyField: 'social_twitter', linkField: 'soc_twitter', kind: 'url' },
     { type: 'YouTube', legacyField: 'social_youtube', linkField: 'soc_youtube', kind: 'url' },
-    { type: 'TMDB', legacyField: 'social_tmdb', linkField: 'soc_tmdb', kind: 'id' }, // TMDB is usually stored as an ID in the legacy column if it's from enrichment, but check if it's URL. We'll default to url since old columns were 'social_tmdb'.
+    { type: 'TMDB', legacyField: 'social_tmdb', linkField: 'soc_tmdb', kind: 'url' }, // Usually URLs mapped to this old column
     { type: 'Soundcloud', legacyField: 'social_soundcloud', linkField: 'soc_soundcloud', kind: 'url' },
     { type: 'Apple Music', legacyField: 'social_apple_music', linkField: 'soc_apple_music', kind: 'url' },
     { type: 'Website', legacyField: 'social_website', linkField: 'soc_website', kind: 'url' },
@@ -30,111 +30,158 @@ const PLATFORMS = [
     { type: 'Bandsintown', legacyField: 'social_bandsintown', linkField: 'soc_bandsintown', kind: 'url' },
     { type: 'Songkick', legacyField: 'social_songkick', linkField: 'soc_songkick', kind: 'url' },
     { type: 'MusicBrainz', legacyField: 'social_musicbrainz', linkField: 'soc_musicbrainz', kind: 'url' },
-    { type: 'AudioDB', legacyField: 'social_audiodb', linkField: 'soc_audiodb', kind: 'url' },
     { type: 'Chartmetric', legacyField: 'social_chartmetric', linkField: 'soc_chartmetric', kind: 'url' },
-    { type: 'Rostr', legacyField: 'social_rostr', linkField: 'soc_rostr', kind: 'url' },
-    { type: 'IMDbPro', legacyField: 'social_imdbpro', linkField: 'soc_imdbpro', kind: 'url' }
+    { type: 'Rostr', legacyField: 'social_rostr', linkField: 'soc_rostr', kind: 'url' }
 ];
 
-async function healPlatform(platform: typeof PLATFORMS[0]) {
-    console.log(`\n🔍 Checking ${platform.type} for missing links...`);
-    let healedCount = 0;
+async function processBatch() {
+    // Select all the legacy fields and link fields for verification
+    const selectFields = [
+        'id', 'name', 
+        ...PLATFORMS.map(p => p.legacyField), 
+        ...PLATFORMS.map(p => p.linkField)
+    ].join(', ');
 
-    let consecutiveErrors = 0;
-    while (true) {
-        // Find records with legacy data but NO linked profile. 
-        // We drop 'order' and 'gt' to avoid massive sorting overhead (which causes Statement Timeouts on 1.4M rows).
-        // Since we link them inside the loop, they naturally fall out of this filter on the next pass!
-        const { data: missing, error } = await supabase
-            .from('talent_profiles')
-            .select(`id, name, ${platform.legacyField}`)
-            .not(platform.legacyField, 'is', null)
-            .neq(platform.legacyField, '')
-            .is(platform.linkField, null)
-            .limit(BATCH_SIZE);
+    // 1. Fetch the next batch of unchecked talent profiles
+    const { data: talents, error } = await supabase
+        .from('talent_profiles')
+        .select(selectFields)
+        .is('linked_records_check', null)
+        .limit(BATCH_SIZE);
 
-        if (error) {
-            console.error(`   ❌ Error fetching missing for ${platform.type}:`, error.message);
-            consecutiveErrors++;
-            if (consecutiveErrors > 3) break;
-            await new Promise(r => setTimeout(r, 2000));
-            continue;
-        }
-        
-        consecutiveErrors = 0;
+    if (error) {
+        console.error('\n❌ Error fetching talent_profiles:', error.message);
+        return 0; // Trigger retry
+    }
 
-        if (!missing || missing.length === 0) break;
+    if (!talents || talents.length === 0) return 0; // Done!
 
-        // Create the new social records
-        const newSocials = missing.map((m: any) => {
-            const row: any = {
-                talent_id: m.id,
-                social_type: platform.type,
-                name: m.name || '',
-                status: 'pending',
-                linking_status: 'done' // Pre-mark it so the background linker ignores it later
-            };
+    const newSocialsToInsert: any[] = [];
+    const internalProfileLinks: Record<string, any> = {};
 
-            const rawVal = m[platform.legacyField];
-            
-            if (platform.kind === 'id') {
-                row.social_id = rawVal;
-            } else if (platform.kind === 'username') {
-                row.username = rawVal;
-            } else {
-                row.social_url = rawVal;
+    // 2. Discover missing links in memory
+    for (const t of (talents as any[])) {
+        // Initialize the tracking object for this talent so it gets marked 'done' even if 0 missing were found
+        internalProfileLinks[t.id] = {
+            id: t.id,
+            linked_records_check: 'done'
+        };
+
+        for (const p of PLATFORMS) {
+            const legacyVal = t[p.legacyField];
+            const linkedVal = t[p.linkField];
+
+            // If it HAS a legacy string but does NOT have a valid uuid link, it's missing!
+            if (legacyVal && legacyVal !== '' && !linkedVal) {
+                const newRow: any = {
+                    talent_id: t.id,
+                    social_type: p.type,
+                    name: t.name || '',
+                    status: 'pending',
+                    linking_status: 'done' // Already linking it right now, so mark done
+                };
+
+                if (p.kind === 'id') newRow.social_id = legacyVal;
+                else if (p.kind === 'username') newRow.username = legacyVal;
+                else newRow.social_url = legacyVal;
+
+                newSocialsToInsert.push(newRow);
             }
+        }
+    }
 
-            return row;
-        });
-
+    // 3. Create social profile records in bulk (if any were missing)
+    if (newSocialsToInsert.length > 0) {
+        // To avoid HUGE header requests, split inserts if necessary, though 500*20 max shouldn't regularly hit limit
         const { data: inserted, error: insertError } = await supabase
             .from('social_profiles')
-            .insert(newSocials)
-            .select('id, talent_id');
+            .insert(newSocialsToInsert)
+            .select('id, talent_id, social_type');
 
         if (insertError) {
-            console.error(`   ❌ Error creating social profiles for ${platform.type}:`, insertError.message);
-            break;
+            console.error('\n❌ Error inserting missing social profiles:', insertError.message);
+            return 0;
         }
 
-        if (inserted && inserted.length > 0) {
-            // Bulk update talent_profiles with the new IDs to close the loop
-            const updates = inserted.map((s: any) => ({
-                id: s.talent_id,
-                [platform.linkField]: s.id
-            }));
-
-            const { error: updateError } = await supabase
-                .from('talent_profiles')
-                .upsert(updates);
-
-            if (updateError) {
-                console.error(`   ❌ Error saving link back to talent_profiles for ${platform.type}:`, updateError.message);
-            } else {
-                healedCount += inserted.length;
-                process.stdout.write(`\r   ✅ Successfully created & linked ${healedCount} missing ${platform.type} profiles.`);
+        if (inserted) {
+            // Map the newly generated UUIDs back to the corresponding talent profile object
+            for (const row of inserted) {
+                const platform = PLATFORMS.find(pl => pl.type === row.social_type);
+                if (platform) {
+                    internalProfileLinks[row.talent_id][platform.linkField] = row.id;
+                }
             }
         }
     }
 
-    if (healedCount > 0) {
-        console.log(`\n   ✨ ${platform.type} Healing Complete! Total Fixed: ${healedCount}`);
-    } else {
-        console.log(`   ✅ ${platform.type} is 100% healthy. No missing links found.`);
+    // 4. Update the talent_profiles table (saving new soc_ UUIDs AND 'done' status)
+    const talentUpdateArray = Object.values(internalProfileLinks);
+
+    // To prevent "URI Too long" or timeout from upserting large payloads, chunk it
+    const CHUNK = 200;
+    for (let i = 0; i < talentUpdateArray.length; i += CHUNK) {
+        const chunk = talentUpdateArray.slice(i, i + CHUNK);
+        const { error: updateError } = await supabase.from('talent_profiles').upsert(chunk);
+        
+        if (updateError) {
+            console.error('\n❌ Error updating talent_profiles:', updateError.message);
+        }
     }
+
+    return talents.length;
 }
 
-async function runHealer() {
-    console.log('🏁 Starting Social Link Healer...');
+async function startHealer() {
+    console.log('🚀 Starting Master Social Healer (Talent Profile Audit)...');
     
-    for (const platform of PLATFORMS) {
-        await healPlatform(platform);
+    // Get total remaining un-checked out of the 1,429,010 total records
+    const { count: initialRemaining } = await supabase
+        .from('talent_profiles')
+        .select('id', { count: 'exact', head: true })
+        .is('linked_records_check', null);
+
+    const originalTotal = 1429010; 
+    let totalProcessedThisSession = 0;
+    let consecutiveErrors = 0;
+
+    console.log(`📊 Initial State: ${initialRemaining || 0} talent records left to audit out of ${originalTotal}.`);
+
+    while (true) {
+        const count = await processBatch();
+
+        if (count > 0) {
+            totalProcessedThisSession += count;
+            const currentRemaining = Math.max(0, (initialRemaining || 0) - totalProcessedThisSession);
+            const totalDone = originalTotal - currentRemaining;
+            const percentComplete = ((totalDone / originalTotal) * 100).toFixed(2);
+            
+            process.stdout.write(`\r   🔍 Audited: Current Batch: ${totalProcessedThisSession} | DB Progress: ${percentComplete}% (${totalDone}/${originalTotal} Done)`);
+            consecutiveErrors = 0;
+        } else if (count === 0) {
+            const { count: remaining } = await supabase
+                .from('talent_profiles')
+                .select('id', { count: 'exact', head: true })
+                .is('linked_records_check', null);
+            
+            if (remaining === 0) {
+                console.log('\n✅ All Talent Profiles have been completely audited and healed!');
+                break;
+            } else {
+                console.log(`\n⚠️ No progress made this round. ${remaining} records remaining. Retrying in 5s...`);
+                consecutiveErrors++;
+                if (consecutiveErrors > 10) {
+                    console.error('❌ Too many consecutive errors. Stopping.');
+                    break;
+                }
+                await new Promise(r => setTimeout(r, 5000));
+            }
+        }
+        
+        // Let the DB breathe
+        await new Promise(r => setTimeout(r, 100));
     }
-    
-    console.log('\n==========================================');
-    console.log('🏁 ALL PLATFORMS AUDITED & HEALED! 🏁');
-    console.log('==========================================\n');
+
+    console.log('\n✨ Social Healing & Audit Complete!');
 }
 
-runHealer();
+startHealer();
