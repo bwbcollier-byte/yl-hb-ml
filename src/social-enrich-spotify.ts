@@ -49,7 +49,8 @@ const PLATFORM_MAP: Record<string, string> = {
 const RAPID_API_HOSTS = [
     'spotify81.p.rapidapi.com',
     'spotify23.p.rapidapi.com',
-    'spotify-data.p.rapidapi.com'
+    'spotify-data.p.rapidapi.com',
+    'spotify-web-api3.p.rapidapi.com'
 ];
 
 let currentHostIndex = 0;
@@ -62,15 +63,30 @@ function getNextHost() {
 async function fetchSpotifyArtistOverview(spotifyId: string): Promise<any> {
     const key = getNextKey();
     const host = getNextHost();
-    const url = `https://${host}/artist_overview?id=${spotifyId}`;
+    
+    // Handle different API formats
+    let url = `https://${host}/artist_overview?id=${spotifyId}`;
+    let options: any = {
+        headers: {
+            'x-rapidapi-host': host,
+            'x-rapidapi-key': key,
+        }
+    };
+
+    if (host === 'spotify-web-api3.p.rapidapi.com') {
+        url = `https://${host}/v1/social/spotify/getartist`;
+        options = {
+            method: 'POST',
+            headers: {
+                ...options.headers,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ id: spotifyId })
+        };
+    }
 
     try {
-        const res = await fetch(url, {
-            headers: {
-                'x-rapidapi-host': host,
-                'x-rapidapi-key': key,
-            },
-        });
+        const res = await fetch(url, options);
 
         if (res.status === 429) {
             console.log(`\n   ⏳ Rate limited on ${host}. Trying next...`);
@@ -79,7 +95,9 @@ async function fetchSpotifyArtistOverview(spotifyId: string): Promise<any> {
 
         if (!res.ok) return null;
         const data: any = await res.json();
-        return data.data?.artist || null;
+        
+        // This host uses artistUnion, others use artist
+        return data.data?.artist || data.data?.artistUnion || null;
     } catch (error) {
         console.error(`\n❌ Network error for ${spotifyId}:`, (error as any).message);
         return null;
