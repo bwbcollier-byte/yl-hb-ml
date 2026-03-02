@@ -66,14 +66,41 @@ async function fetchDeezerArtist(socialId: string): Promise<any> {
     }
 }
 
+async function searchDeezerArtist(name: string): Promise<any> {
+    const key = getNextKey();
+    const url = `https://deezerdevs-deezer.p.rapidapi.com/search/artist?q=${encodeURIComponent(name)}`;
+
+    try {
+        const res = await fetch(url, {
+            headers: {
+                'x-rapidapi-host': 'deezerdevs-deezer.p.rapidapi.com',
+                'x-rapidapi-key': key,
+            },
+        });
+
+        if (res.status === 429) {
+            console.log('\n   ⏳ Rate limited on Deezer search. Trying next...');
+            return searchDeezerArtist(name);
+        }
+
+        if (!res.ok) return null;
+        const data: any = await res.json();
+        if (!data.data || data.data.length === 0) return null;
+        
+        // Pick best match - exact name or first result
+        const bestMatch = data.data.find((a: any) => a.name.toLowerCase() === name.toLowerCase());
+        return bestMatch || data.data[0];
+    } catch {
+        return null;
+    }
+}
+
 async function processBatch(): Promise<number> {
     const { data: profiles, error } = await supabase
         .from('social_profiles')
         .select('id, social_id, talent_id, name')
         .eq('social_type', 'Deezer')
         .not('status', 'in', '("Done","Error")')
-        .not('social_id', 'is', null)
-        .neq('social_id', '')
         .limit(BATCH_SIZE);
 
     if (error) {
@@ -86,7 +113,12 @@ async function processBatch(): Promise<number> {
     for (const profile of profiles) {
         process.stdout.write(`\r   🎵 Processing: ${profile.name || profile.social_id}...`);
 
-        const data = await fetchDeezerArtist(profile.social_id!);
+        let data = null;
+        if (profile.social_id) {
+            data = await fetchDeezerArtist(profile.social_id);
+        } else if (profile.name) {
+            data = await searchDeezerArtist(profile.name);
+        }
 
         if (data) {
             const artistName = data.name || profile.name;
@@ -94,11 +126,12 @@ async function processBatch(): Promise<number> {
 
             await supabase.from('social_profiles').update({
                 name: artistName,
+                social_id: data.id ? String(data.id) : profile.social_id,
                 username: cleanUsername,
                 social_image: data.picture_xl || data.picture_medium || null,
                 followers_count: data.nb_fan || null,
                 media_count: data.nb_album || null,
-                social_url: data.link || `https://www.deezer.com/artist/${profile.social_id}`,
+                social_url: data.link || `https://www.deezer.com/artist/${data.id || profile.social_id}`,
                 status: 'Done',
                 last_checked: new Date().toISOString(),
                 updated_at: new Date().toISOString(),
