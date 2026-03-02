@@ -6,18 +6,15 @@ import readline from 'readline';
 dotenv.config();
 
 /**
- * MUSICFETCH MASTER ENRICHER (V2.1)
+ * MUSICFETCH MASTER ENRICHER (V2.1 - SUPER BATCHED)
  * 
  * 1. Finds Spotify profiles where mf_check is NULL
  * 2. Hits MusicFetch API with deep-field parameters
- * 3. Actions:
- *    - Creates a 'MusicFetch' social_profile if not exists (using Spotify ID/URL)
- *    - Store the 'social_about' on the NEW MusicFetch record
- *    - Discovers and CREATES/LINKS all other platform records (Deezer, Apple, etc.)
- *    - Updates talent_profiles (dob, hometown, aliases)
- *    - MARKS original Spotify record as mf_check = NOW()
- * 
- * Rate Limit: ~40 reqs/min (using 1.6s delay)
+ * 3. BATCHES all database operations to minimize round-trips:
+ *    - All existing social profiles are pre-fetched in 1 call per batch.
+ *    - All talent updates are executed in 1 bulk call.
+ *    - All new social profiles are inserted in 1 bulk call.
+ *    - All existing social profile updates are executed in 1 bulk call.
  */
 
 const BATCH_SIZE = 20;
@@ -55,7 +52,7 @@ async function fetchMusicFetch(spotifyUrl: string, token: string) {
 }
 
 async function processBatch(token: string): Promise<number> {
-    const { data: profiles, error } = await supabase
+    const { data: spotifyProfiles, error } = await supabase
         .from('social_profiles')
         .select('id, social_url, social_id, talent_id, name')
         .eq('social_type', 'Spotify')
@@ -68,25 +65,37 @@ async function processBatch(token: string): Promise<number> {
         return 0;
     }
 
-    if (!profiles || profiles.length === 0) return 0;
+    if (!spotifyProfiles || spotifyProfiles.length === 0) return 0;
 
-    for (const profile of profiles) {
+    // PRE-FETCH all existing social profiles for this batch of talents
+    const talentIds = spotifyProfiles.map(p => p.talent_id);
+    const { data: existingSocials } = await supabase
+        .from('social_profiles')
+        .select('id, talent_id, social_type, social_id, social_url, social_image, social_about')
+        .in('talent_id', talentIds);
+
+    // Organize existing socials by talent_id + social_type for O(1) lookup
+    const socialMap = new Map<string, any>();
+    existingSocials?.forEach(s => {
+        socialMap.set(`${s.talent_id}_${s.social_type}`, s);
+    });
+
+    const talentUpdates: any[] = [];
+    const socialInserts: any[] = [];
+    const socialUpdates: any[] = [];
+    const spotifyRowUpdates: any[] = [];
+
+    for (const profile of spotifyProfiles) {
         process.stdout.write(`\r   🔍 MusicFetch: ${profile.name || profile.id}...`);
         
         const data = await fetchMusicFetch(profile.social_url!, token);
         const result = data?.result;
 
         if (result) {
-            // 1. Create/Update MusicFetch social_profile
-            const { data: existingMF } = await supabase
-                .from('social_profiles')
-                .select('id')
-                .eq('talent_id', profile.talent_id)
-                .eq('social_type', 'MusicFetch')
-                .maybeSingle();
-
+            // 1. Prepare MusicFetch social_profile
+            const existingMF = socialMap.get(`${profile.talent_id}_MusicFetch`);
             if (!existingMF) {
-                await supabase.from('social_profiles').insert({
+                socialInserts.push({
                     talent_id: profile.talent_id,
                     social_type: 'MusicFetch',
                     social_id: profile.social_id,
@@ -97,28 +106,24 @@ async function processBatch(token: string): Promise<number> {
                     linking_status: 'done',
                     created_at: new Date().toISOString()
                 });
-                console.log(`   ✨ Created MusicFetch profile (Bio/About stored)`);
             } else {
-                await supabase.from('social_profiles').update({
+                socialUpdates.push({
+                    id: existingMF.id,
                     social_about: result.description,
                     social_image: result.image?.url,
                     updated_at: new Date().toISOString()
-                }).eq('id', existingMF.id);
-                console.log(`   📝 Updated MusicFetch profile (Bio/About refreshed)`);
+                });
             }
 
-            // 2. Update Talent Metadata
-            const talentUpdate: any = {};
-            if (result.dateOfBirth) talentUpdate.dob = result.dateOfBirth;
-            if (result.hometown) talentUpdate.hometown = result.hometown;
-            if (result.aliases && Array.isArray(result.aliases)) talentUpdate.aliases = result.aliases;
-            
-            if (Object.keys(talentUpdate).length > 0) {
-                await supabase.from('talent_profiles').update(talentUpdate).eq('id', profile.talent_id);
-                console.log(`   👤 Updated Talent: ${Object.keys(talentUpdate).join(', ')}`);
-            }
+            // 2. Prepare Talent Metadata
+            const tUpdate: any = { id: profile.talent_id };
+            let hasTChange = false;
+            if (result.dateOfBirth) { tUpdate.dob = result.dateOfBirth; hasTChange = true; }
+            if (result.hometown) { tUpdate.hometown = result.hometown; hasTChange = true; }
+            if (result.aliases && Array.isArray(result.aliases)) { tUpdate.aliases = result.aliases; hasTChange = true; }
+            if (hasTChange) talentUpdates.push(tUpdate);
 
-            // 3. Discovery/Linking (All other platforms)
+            // 3. Prepare Discovery/Linking
             const services = result.services || {};
             for (const [sKey, sData] of Object.entries(services) as [string, any][]) {
                 const sType = mapServiceToType(sKey);
@@ -130,16 +135,9 @@ async function processBatch(token: string): Promise<number> {
                 const sAbout = sData.description;
 
                 if (url || sId) {
-                    const { data: existing } = await supabase
-                        .from('social_profiles')
-                        .select('id, social_id, social_url, social_image, social_about')
-                        .eq('talent_id', profile.talent_id)
-                        .eq('social_type', sType)
-                        .maybeSingle();
-
+                    const existing = socialMap.get(`${profile.talent_id}_${sType}`);
                     if (!existing) {
-                        // CREATE NEW RECORD
-                        await supabase.from('social_profiles').insert({
+                        socialInserts.push({
                             talent_id: profile.talent_id,
                             social_type: sType,
                             social_id: sId,
@@ -148,45 +146,52 @@ async function processBatch(token: string): Promise<number> {
                             social_about: sAbout,
                             name: profile.name,
                             linking_status: 'done',
-                            created_at: new Date().toISOString(),
-                            updated_at: new Date().toISOString()
+                            created_at: new Date().toISOString()
                         });
-                        console.log(`   ✨ Created ${sType} (ID: ${sId || 'URL only'})`);
                     } else {
-                        // UPDATE MISSING VALUES
-                        const updateObj: any = {};
-                        if (!existing.social_id && sId) updateObj.social_id = sId;
-                        if (!existing.social_url && url) updateObj.social_url = url;
-                        if (!existing.social_image && sImg) updateObj.social_image = sImg;
-                        if (!existing.social_about && sAbout) updateObj.social_about = sAbout;
+                        const sUpdate: any = { id: existing.id };
+                        let hasSChange = false;
+                        if (!existing.social_id && sId) { sUpdate.social_id = sId; hasSChange = true; }
+                        if (!existing.social_url && url) { sUpdate.social_url = url; hasSChange = true; }
+                        if (!existing.social_image && sImg) { sUpdate.social_image = sImg; hasSChange = true; }
+                        if (!existing.social_about && sAbout) { sUpdate.social_about = sAbout; hasSChange = true; }
                         
-                        if (Object.keys(updateObj).length > 0) {
-                            await supabase.from('social_profiles').update({
-                                ...updateObj,
-                                updated_at: new Date().toISOString()
-                            }).eq('id', existing.id);
-                            console.log(`   🔄 Updated ${sType}: ${Object.keys(updateObj).join(', ')}`);
+                        if (hasSChange) {
+                            sUpdate.updated_at = new Date().toISOString();
+                            socialUpdates.push(sUpdate);
                         }
                     }
                 }
             }
 
-            // 4. Mark Spotify record as checked
-            await supabase.from('social_profiles').update({
-                mf_check: new Date().toISOString()
-            }).eq('id', profile.id);
+            // Target Spotify row for tracking
+            spotifyRowUpdates.push({ id: profile.id, mf_check: new Date().toISOString() });
 
         } else {
-            // Mark as checked to avoid re-retrying failures
-            await supabase.from('social_profiles').update({
-                mf_check: new Date().toISOString()
-            }).eq('id', profile.id);
+            // Mark even on failure to avoid infinite loop
+            spotifyRowUpdates.push({ id: profile.id, mf_check: new Date().toISOString() });
         }
 
         await sleep(SLEEP_MS);
     }
 
-    return profiles.length;
+    // 🚀 EXECUTE BATCH DATABASE OPERATIONS
+    if (talentUpdates.length > 0) {
+        await supabase.from('talent_profiles').upsert(talentUpdates);
+    }
+    if (socialInserts.length > 0) {
+        await supabase.from('social_profiles').insert(socialInserts);
+    }
+    if (socialUpdates.length > 0) {
+        await supabase.from('social_profiles').upsert(socialUpdates);
+    }
+    if (spotifyRowUpdates.length > 0) {
+        await supabase.from('social_profiles').upsert(spotifyRowUpdates);
+    }
+
+    console.log(`\n   ✅ Batch Complete: ${talentUpdates.length} Talent updates, ${socialInserts.length} Social inserts, ${socialUpdates.length} Social updates.`);
+
+    return spotifyProfiles.length;
 }
 
 function mapServiceToType(key: string): string | null {
@@ -227,8 +232,8 @@ function askToken(): Promise<string> {
 }
 
 async function main() {
-    console.log('\n🎧 MusicFetch Master Linker & Talent Enricher');
-    console.log('============================================');
+    console.log('\n🎧 MusicFetch Master Linker & Talent Enricher (SUPER BATCHED)');
+    console.log('============================================================');
 
     const token = await askToken();
     if (!token) {
@@ -241,7 +246,7 @@ async function main() {
         const count = await processBatch(token);
         if (count === 0) break;
         totalProcessed += count;
-        process.stdout.write(`\r   ✅ Total Spotify profiles checked: ${totalProcessed}`);
+        // console.log output is handled inside processBatch
     }
     console.log(`\n\n✨ Done! Enriched ${totalProcessed} artists.`);
     rl.close();
