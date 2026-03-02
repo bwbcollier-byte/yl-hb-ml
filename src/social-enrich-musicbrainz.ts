@@ -62,6 +62,24 @@ async function fetchMBData(mbid: string): Promise<any> {
     }
 }
 
+function extractIdFromUrl(url: string, type: string): string | null {
+    if (!url) return null;
+    try {
+        const u = new URL(url);
+        const pathParts = u.pathname.split('/').filter(p => p.length > 0);
+        if (type === 'Instagram' || type === 'Twitter' || type === 'Facebook' || type === 'TikTok') return pathParts[0] || null;
+        if (type === 'YouTube') {
+            if (pathParts[0] === 'channel' || pathParts[0] === 'user' || pathParts[0] === 'c') return pathParts[1] || null;
+            if (pathParts[0]?.startsWith('@')) return pathParts[0];
+            return pathParts[0] || null;
+        }
+    } catch {
+        const parts = url.split('/').filter(p => p.length > 0);
+        return parts[parts.length - 1] || null;
+    }
+    return null;
+}
+
 async function processBatch(): Promise<number> {
     const { data: profiles, error } = await supabase
         .from('social_profiles')
@@ -102,9 +120,12 @@ async function processBatch(): Promise<number> {
         // Build update for this social_profile row
         const tags = mbData.tags?.sort((a: any, b: any) => b.count - a.count).slice(0, 10).map((t: any) => t.name).join(', ') || null;
         const aliases = mbData.aliases?.map((a: any) => a.name).slice(0, 10).join(', ') || null;
+        const artistName = mbData.name || profile.name;
+        const cleanUsername = artistName.toLowerCase().replace(/[^a-z0-9]/g, '');
 
         const profileUpdate: any = {
-            name: mbData.name || profile.name,
+            name: artistName,
+            username: cleanUsername,
             social_url: `https://musicbrainz.org/artist/${mbid}`,
             social_id: mbid, // clean MBID not URL
             social_about: [
@@ -131,20 +152,22 @@ async function processBatch(): Promise<number> {
             const socialType = detectType(url);
             if (!socialType) continue;
 
-            // Check this talent doesn't already have a social_profile for this type + url 
+            // Check this talent already has this exact URL linked
             const { data: existing } = await supabase
                 .from('social_profiles')
                 .select('id')
                 .eq('talent_id', profile.talent_id)
-                .eq('social_type', socialType)
                 .eq('social_url', url)
                 .maybeSingle();
 
             if (!existing) {
+                const extractedId = extractIdFromUrl(url, socialType);
                 newSocials.push({
                     talent_id: profile.talent_id,
                     social_type: socialType,
-                    name: profile.name,
+                    social_id: extractedId,
+                    name: artistName,
+                    username: cleanUsername,
                     social_url: url,
                     status: null, // Will be picked up by the relevant enricher next
                     linking_status: 'done',

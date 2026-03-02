@@ -99,6 +99,9 @@ async function processBatch(offset: number): Promise<number> {
 
         if (!mfData?.services) continue;
 
+        const artistName = profile.name;
+        const cleanUsername = artistName ? artistName.toLowerCase().replace(/[^a-z0-9]/g, '') : null;
+
         // For each platform returned, check if the talent already has a social_profile for it
         // If not, create one. If yes and it doesn't have a URL, update it.
         const upserts: any[] = [];
@@ -121,14 +124,15 @@ async function processBatch(offset: number): Promise<number> {
             if (existing) {
                 // Only update URL if it's missing
                 if (!existing.social_url) {
-                    upserts.push({ id: existing.id, social_url: link, updated_at: new Date().toISOString() });
+                    upserts.push({ id: existing.id, social_url: link, username: cleanUsername, updated_at: new Date().toISOString() });
                 }
             } else {
                 // Create a brand new social_profile row for this platform
                 upserts.push({
                     talent_id: profile.talent_id,
                     social_type: socialType,
-                    name: profile.name,
+                    name: artistName,
+                    username: cleanUsername,
                     social_url: link,
                     status: null, // Will be picked up by the specific enricher for this platform
                     linking_status: 'done',

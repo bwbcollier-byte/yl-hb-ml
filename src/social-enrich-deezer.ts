@@ -5,14 +5,16 @@ import { supabase } from './supabase';
 dotenv.config();
 
 /**
- * DEEZER SOCIAL ENRICHER
+ * DEEZER SOCIAL ENRICHER (RapidAPI Version)
  * 
- * Reads from social_profiles WHERE social_type = 'Deezer' AND status IS NULL
- * Gets the social_id (Deezer Artist ID) and hits the Deezer API via RapidAPI
- * Writes image, followers, album count back to social_profiles
+ * 1. Reads from social_profiles WHERE social_type = 'Deezer' AND status IS NULL
+ * 2. Hits RapidAPI (deezerdevs) to get artist data
+ * 3. Updates record with image, followers, clean username
+ * 4. (Note: Deezer API doesn't usually provide external links directly in the main artist call, 
+ *    but we keep the structure consistent).
  */
 
-const BATCH_SIZE = 500;
+const BATCH_SIZE = 100;
 const SLEEP_MS = 200;
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
@@ -21,12 +23,7 @@ const RAPID_API_KEYS = [
     '7f039e9cd5msh7d53bf9623df131p1191ccjsnd5baa1efdd82',
     '0be625e0dbmshe3f58bae0a1b103p1a9cb4jsn8f4252e04b42',
     'bfb3e64505mshd9c819df5fb856fp18e4f4jsn98cea7554500',
-    '4146451f26mshca24e2bfa13bff4p1aab81jsn84d33f841460',
-    '8be5f006c9mshd812675480db254p1b653ejsn602cc9149241',
-    '2a6da923bamsh0840070fa506709p145861jsnae8888e67f00',
-    '8f8ab324eamsh88b8de70b402e0cp1d7d0ajsn13c934eadbd9',
-    '4030dde5ddmshe67eb1d7832914dp17c97ajsndaa5b65ce7d4',
-    '730a02e172msh79ca9cab92fe41dp1b34a2jsnd53411309cd7'
+    '4146451f26mshca24e2bfa13bff4p1aab81jsn84d33f841460'
 ];
 
 let currentKeyIndex = 0;
@@ -42,12 +39,16 @@ async function fetchDeezerArtist(socialId: string): Promise<any> {
 
     try {
         const res = await fetch(url, {
-            method: 'GET',
             headers: {
                 'x-rapidapi-host': 'deezerdevs-deezer.p.rapidapi.com',
                 'x-rapidapi-key': key,
             },
         });
+
+        if (res.status === 429) {
+            console.log('\n   ⏳ Rate limited on Deezer key. Trying next...');
+            return fetchDeezerArtist(socialId);
+        }
 
         if (!res.ok) return null;
         const data: any = await res.json();
@@ -61,7 +62,7 @@ async function fetchDeezerArtist(socialId: string): Promise<any> {
 async function processBatch(): Promise<number> {
     const { data: profiles, error } = await supabase
         .from('social_profiles')
-        .select('id, social_id, name')
+        .select('id, social_id, talent_id, name')
         .eq('social_type', 'Deezer')
         .is('status', null)
         .not('social_id', 'is', null)
@@ -69,13 +70,11 @@ async function processBatch(): Promise<number> {
         .limit(BATCH_SIZE);
 
     if (error) {
-        console.error('❌ Error fetching Deezer social profiles:', error.message);
+        console.error('❌ Error fetching Deezer profiles:', error.message);
         return 0;
     }
 
     if (!profiles || profiles.length === 0) return 0;
-
-    const updates: any[] = [];
 
     for (const profile of profiles) {
         process.stdout.write(`\r   🎵 Processing: ${profile.name || profile.social_id}...`);
@@ -83,10 +82,12 @@ async function processBatch(): Promise<number> {
         const data = await fetchDeezerArtist(profile.social_id!);
 
         if (data) {
-            updates.push({
-                id: profile.id,
-                name: data.name || profile.name,
-                username: data.name?.toLowerCase().replace(/[^a-z0-9]/g, '') || null,
+            const artistName = data.name || profile.name;
+            const cleanUsername = artistName.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+            await supabase.from('social_profiles').update({
+                name: artistName,
+                username: cleanUsername,
                 social_image: data.picture_xl || data.picture_medium || null,
                 followers_count: data.nb_fan || null,
                 media_count: data.nb_album || null,
@@ -94,23 +95,16 @@ async function processBatch(): Promise<number> {
                 status: 'Done',
                 last_checked: new Date().toISOString(),
                 updated_at: new Date().toISOString(),
-            });
+            }).eq('id', profile.id);
+
         } else {
-            updates.push({
-                id: profile.id,
+            await supabase.from('social_profiles').update({
                 status: 'Error',
                 last_checked: new Date().toISOString(),
-            });
+            }).eq('id', profile.id);
         }
 
         await sleep(SLEEP_MS);
-    }
-
-    const CHUNK = 100;
-    for (let i = 0; i < updates.length; i += CHUNK) {
-        const chunk = updates.slice(i, i + CHUNK);
-        const { error: saveError } = await supabase.from('social_profiles').upsert(chunk);
-        if (saveError) console.error('\n❌ Error saving batch:', saveError.message);
     }
 
     return profiles.length;
@@ -119,7 +113,6 @@ async function processBatch(): Promise<number> {
 async function main() {
     console.log('\n🎵 Deezer Social Profile Enricher');
     console.log('===================================');
-    console.log(`📡 Using ${RAPID_API_KEYS.length} API keys in rotation.`);
 
     const { count: total } = await supabase
         .from('social_profiles')
@@ -135,7 +128,7 @@ async function main() {
         const count = await processBatch();
         if (count === 0) break;
         totalProcessed += count;
-        process.stdout.write(`\r   ✅ Processed ${totalProcessed} Deezer profiles so far...`);
+        process.stdout.write(`\r   ✅ Processed ${totalProcessed} Deezer profiles...`);
     }
 
     console.log(`\n\n✨ Done! Enriched ${totalProcessed} Deezer social profiles.`);

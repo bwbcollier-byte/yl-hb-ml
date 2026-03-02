@@ -88,10 +88,14 @@ async function processBatch(offset: number): Promise<number> {
         const socialData = await fetchAudioDBSocials(adbData.idArtist);
         await sleep(SLEEP_MS);
 
+        const artistName = adbData.strArtist || profile.name;
+        const cleanUsername = artistName.toLowerCase().replace(/[^a-z0-9]/g, '');
+
         const adbRow: any = {
             talent_id: profile.talent_id,
             social_type: 'AudioDB',
-            name: adbData.strArtist || profile.name,
+            name: artistName,
+            username: cleanUsername,
             social_id: adbData.idArtist,
             social_url: `https://www.theaudiodb.com/artist/${adbData.idArtist}`,
             social_image: adbData.strArtistThumb || adbData.strArtistFanart || null,
