@@ -23,7 +23,7 @@ const RAPID_API_KEYS = [
     '4146451f26mshca24e2bfa13bff4p1aab81jsn84d33f841460',
     '8be5f006c9mshd812675480db254p1b653ejsn602cc9149241',
     '2a6da923bamsh0840070fa506709p145861jsnae8888e67f00',
-    '0be625e0dbmshe3f58bae0a1b103p1a9cb4jsn8f4252e04b42',
+    '89039e9cd5msh7d53bf9623df131p1191ccjsnd5baa1efdd82', // Unique key
     'cea3641b50msh52581f483562ccdp186ee6jsn6759e8241393',
     '8f8ab324eamsh88b8de70b402e0cp1d7d0ajsn13c934eadbd9',
     '4030dde5ddmshe67eb1d7832914dp17c97ajsndaa5b65ce7d4',
@@ -97,7 +97,7 @@ async function processBatch(): Promise<number> {
         .from('social_profiles')
         .select('id, social_id, talent_id, name')
         .eq('social_type', 'Deezer')
-        .or('status.is.null,status.neq.Done,status.neq.DONE,status.neq.Error')
+        .or('status.is.null,and(status.neq.Done,status.neq.DONE,status.neq.Error)')
         .limit(BATCH_SIZE);
 
     if (error) {
@@ -110,7 +110,7 @@ async function processBatch(): Promise<number> {
     const socialUpdates: any[] = [];
 
     for (const profile of profiles) {
-        process.stdout.write(`\r   🎵 Deezer: ${profile.name || profile.social_id || profile.id}...`);
+        const artistName = profile.name || profile.social_id || profile.id;
 
         let data = null;
         if (profile.social_id) {
@@ -120,12 +120,14 @@ async function processBatch(): Promise<number> {
         }
 
         if (data) {
-            const artistName = data.name || profile.name;
-            const cleanUsername = artistName.toLowerCase().replace(/[^a-z0-9]/g, '');
+            const finalName = data.name || profile.name;
+            const cleanUsername = finalName.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+            console.log(`   ✅ Enriched: ${finalName.padEnd(25)} | 👥 ${String(data.nb_fan || 0).padEnd(8)} fans | 💿 ${String(data.nb_album || 0).padEnd(4)} albums`);
 
             socialUpdates.push({
                 id: profile.id,
-                name: artistName,
+                name: finalName,
                 social_id: data.id ? String(data.id) : profile.social_id,
                 username: cleanUsername,
                 social_image: data.picture_xl || data.picture_medium || null,
@@ -138,7 +140,7 @@ async function processBatch(): Promise<number> {
             });
 
         } else {
-            console.log(`   ❌ Failed: ${profile.name || profile.id} (No results or API error)`);
+            console.log(`   ❌ Failed:   ${String(artistName).slice(0, 25).padEnd(25)} | (No results or API error)`);
             socialUpdates.push({
                 id: profile.id,
                 status: 'Error',
@@ -158,7 +160,7 @@ async function processBatch(): Promise<number> {
         if (updateError) {
             console.error('\n❌ Bulk Update Error:', updateError.message);
         } else {
-            process.stdout.write(`\n   ✅ Batched ${socialUpdates.length} updates to DB.`);
+            console.log(`\n   📦 Batch written: ${socialUpdates.length} records updated in database.`);
         }
     }
 
@@ -166,7 +168,7 @@ async function processBatch(): Promise<number> {
 }
 
 async function main() {
-    console.log('\n🎵 Deezer Social Profile Enricher (SUPER BATCHED)');
+    console.log('\n🎵 Deezer Social Profile Enricher (VERBOSE LOGGING)');
     console.log('================================================');
 
     const { count: total, error: countErr } = await supabase
@@ -184,6 +186,7 @@ async function main() {
         const count = await processBatch();
         if (count === 0) break;
         totalProcessed += count;
+        console.log(`   📉 Total Progress: ${totalProcessed} processed. Remaining: ~${(total || 0) - totalProcessed}`);
     }
 
     console.log(`\n\n✨ Done! Enriched ${totalProcessed} Deezer social profiles.`);
