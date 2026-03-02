@@ -9,17 +9,21 @@ dotenv.config();
  * 
  * 1. Reads from social_profiles WHERE social_type = 'Spotify' AND status IS NULL
  * 2. Hits RapidAPI (spotify81) to get full artist overview
- * 3. Updates the record with biography, followers, image, etc.
- * 4. Discovers and creates other social profiles (Facebook, Instagram, etc.) from externalLinks
+ * 3. Updates the Social Profile record
+ * 4. Discovers and Creates:
+ *    - media_profiles (Albums/Singles)
+ *    - event_profiles (Concerts)
+ *    - talent_profiles (Related Artists Discovery)
+ *    - other social_profiles (Links Discovery)
  */
 
-const BATCH_SIZE = 100;
-const SLEEP_MS = 1000; // RapidAPI rate limits can be tight
+const BATCH_SIZE = 50;
+const SLEEP_MS = 1000;
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 const RAPID_API_KEYS = [
     'c83516b3acmshdfd6347a5914a11p17e517jsn06a3c5de8b13',
-    '7f039e9cd5msh7d53bf9623df131p1191ccjsnd5baa1efdd82', // The one you specifically provided
+    '7f039e9cd5msh7d53bf9623df131p1191ccjsnd5baa1efdd82',
     '0be625e0dbmshe3f58bae0a1b103p1a9cb4jsn8f4252e04b42',
     'bfb3e64505mshd9c819df5fb856fp18e4f4jsn98cea7554500',
     '4146451f26mshca24e2bfa13bff4p1aab81jsn84d33f841460'
@@ -83,11 +87,14 @@ function extractIdFromUrl(url: string, type: string): string | null {
             return pathParts[0] || null;
         }
     } catch {
-        // Fallback for non-standard URLs
         const parts = url.split('/').filter(p => p.length > 0);
         return parts[parts.length - 1] || null;
     }
     return null;
+}
+
+function getCleanUsername(name: string): string {
+    return name.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
 async function processBatch(): Promise<number> {
@@ -113,40 +120,38 @@ async function processBatch(): Promise<number> {
         const artist = await fetchSpotifyArtistOverview(profile.social_id!);
 
         if (artist) {
-            // 1. Update the Spotify record itself
-            const profile = artist.profile || {};
+            const apiProfile = artist.profile || {};
             const stats = artist.stats || {};
             const visuals = artist.visuals || {};
 
-            const avatarUrl = visuals.avatarImage?.sources?.[0]?.url || null; // Avatar usually only has 1 main
-            const bio = profile.biography?.text || null;
+            const avatarUrl = visuals.avatarImage?.sources?.[0]?.url || null;
+            const bio = apiProfile.biography?.text || null;
             const followers = stats.followers || null;
             const monthlyListeners = stats.monthlyListeners || null;
             const worldRank = stats.worldRank || null;
-            const isVerified = profile.verified || false;
+            const isVerified = apiProfile.verified || false;
 
-            // Gallery: Pick the largest source for each item
             const gallery = visuals.gallery?.items?.map((item: any) => {
                 const sources = item.sources || [];
-                // Sort by width descending to find the largest
                 const largest = [...sources].sort((a: any, b: any) => (b.width || 0) - (a.width || 0))[0];
                 return largest?.url;
             }).filter(Boolean) || [];
 
             const topCities = stats.topCities?.items || [];
             
-            const artistName = profile.name || profile.name;
-            const cleanUsername = artistName.toLowerCase().replace(/[^a-z0-9]/g, '');
+            const artistName = apiProfile.name || profile.name;
+            const cleanUsername = getCleanUsername(artistName);
 
+            // 1. Update the Spotify record itself
             await supabase.from('social_profiles').update({
                 name: artistName,
                 username: cleanUsername,
-                verified: isVerified,
+                is_verified: isVerified,
                 social_image: avatarUrl,
                 social_about: bio ? bio.slice(0, 5000) : null,
                 followers_count: followers,
-                following: monthlyListeners, // Mapping monthlyListeners to following as requested
-                social_rank: worldRank, // Mapping worldRank to rank
+                following: monthlyListeners,
+                social_rank: worldRank,
                 images: gallery, 
                 top_cities: topCities, 
                 status: 'Done',
@@ -154,8 +159,124 @@ async function processBatch(): Promise<number> {
                 updated_at: new Date().toISOString()
             }).eq('id', profile.id);
 
-            // 2. Discover and create other links
-            const externalLinks = profile.externalLinks?.items || [];
+            // 2. Media Profiles (Albums)
+            const albums = artist.discography?.albums?.items || [];
+            for (const albumGroup of albums) {
+                const albumItems = albumGroup.releases?.items || [];
+                for (const item of albumItems) {
+                    if (!item.id) continue;
+                    
+                    const { data: existingMedia } = await supabase
+                        .from('media_profiles')
+                        .select('id')
+                        .eq('spotify_album_id', item.id)
+                        .maybeSingle();
+
+                    if (!existingMedia) {
+                        const coverArt = item.coverArt?.sources || [];
+                        const largestCover = [...coverArt].sort((a: any, b: any) => (b.width || 0) - (a.width || 0))[0];
+                        
+                        await supabase.from('media_profiles').insert({
+                            talent_id: profile.talent_id,
+                            name: item.name,
+                            media_type: item.type === 'ALBUM' ? 'Album' : 'Single',
+                            spotify_album_id: item.id,
+                            media_url: `https://open.spotify.com/album/${item.id}`,
+                            image_url: largestCover?.url || null,
+                            release_date: item.date ? `${item.date.year}-${String(item.date.month || 1).padStart(2, '0')}-${String(item.date.day || 1).padStart(2, '0')}` : null,
+                            label: item.label || null,
+                            created_at: new Date().toISOString()
+                        });
+                    }
+                }
+            }
+
+            // 3. Event Profiles (Concerts)
+            const concerts = artist.goods?.events?.concerts?.items || [];
+            for (const concert of concerts) {
+                if (!concert.id) continue;
+
+                const { data: existingEvent } = await supabase
+                    .from('event_profiles')
+                    .select('id')
+                    .eq('spotify_id', concert.id)
+                    .maybeSingle();
+
+                if (!existingEvent) {
+                    await supabase.from('event_profiles').insert({
+                        talent_id: profile.talent_id,
+                        name: concert.title || artistName,
+                        event_type: concert.category || 'Concert',
+                        spotify_id: concert.id,
+                        event_url: `https://open.spotify.com/concert/${concert.id}`,
+                        venue_name: concert.venue?.name || null,
+                        location_name: concert.venue?.location?.name || null,
+                        latitude: concert.venue?.location?.coordinates?.latitude || null,
+                        longitude: concert.venue?.location?.coordinates?.longitude || null,
+                        start_date: concert.date?.isoString || null,
+                        created_at: new Date().toISOString()
+                    });
+                }
+            }
+
+            // 4. Talent Discovery (Related Artists)
+            const related = artist.relatedContent?.relatedArtists?.items || [];
+            for (const rel of related) {
+                if (!rel.id) continue;
+
+                // Check if talent already exists via spotify_id
+                const { data: existingTalent } = await supabase
+                    .from('talent_profiles')
+                    .select('id, soc_spotify')
+                    .eq('spotify_id', rel.id)
+                    .maybeSingle();
+
+                if (!existingTalent) {
+                    // Create Talent Profile
+                    const relAvatar = rel.visuals?.avatarImage?.sources || [];
+                    const largestRelAvatar = [...relAvatar].sort((a: any, b: any) => (b.width || 0) - (a.width || 0))[0];
+
+                    const { data: newTalent, error: tErr } = await supabase
+                        .from('talent_profiles')
+                        .insert({
+                            name: rel.profile?.name,
+                            spotify_id: rel.id,
+                            image_url: largestRelAvatar?.url || null,
+                            created_at: new Date().toISOString()
+                        })
+                        .select()
+                        .single();
+
+                    if (newTalent) {
+                        // Create associated Social Profile
+                        const { data: newSoc, error: sErr } = await supabase
+                            .from('social_profiles')
+                            .insert({
+                                talent_id: newTalent.id,
+                                social_type: 'Spotify',
+                                social_id: rel.id,
+                                name: rel.profile?.name,
+                                username: getCleanUsername(rel.profile?.name || ''),
+                                social_url: `https://open.spotify.com/artist/${rel.id}`,
+                                social_image: largestRelAvatar?.url || null,
+                                linking_status: 'done',
+                                created_at: new Date().toISOString()
+                            })
+                            .select()
+                            .single();
+
+                        if (newSoc) {
+                            // Link back to talent
+                            await supabase.from('talent_profiles')
+                                .update({ soc_spotify: newSoc.id })
+                                .eq('id', newTalent.id);
+                        }
+                    }
+                }
+            }
+
+            // 5. External Links Discovery
+            const externalLinks = apiProfile.externalLinks?.items || [];
             const newSocials: any[] = [];
 
             for (const link of externalLinks) {
@@ -163,7 +284,6 @@ async function processBatch(): Promise<number> {
                 const socialType = PLATFORM_MAP[platformName] || (platformName ? 'Website' : null);
                 
                 if (socialType && link.url) {
-                    // Check if this talent already has this exact URL linked
                     const { data: existing } = await supabase
                         .from('social_profiles')
                         .select('id')
@@ -176,11 +296,11 @@ async function processBatch(): Promise<number> {
                         newSocials.push({
                             talent_id: profile.talent_id,
                             social_type: socialType,
-                            social_id: extractedId, // ID extracted from URL where possible
+                            social_id: extractedId,
                             name: artistName,
                             username: cleanUsername,
                             social_url: link.url,
-                            status: null, // Leave as null so the specialized enricher picks it up
+                            status: null,
                             linking_status: 'done',
                             created_at: new Date().toISOString(),
                             updated_at: new Date().toISOString()
@@ -190,9 +310,7 @@ async function processBatch(): Promise<number> {
             }
 
             if (newSocials.length > 0) {
-                const { error: insertErr } = await supabase.from('social_profiles').insert(newSocials);
-                if (insertErr) console.error(`\n   ⚠️ Could not insert discovered links: ${insertErr.message}`);
-                else process.stdout.write(`  +${newSocials.length} links discovered`);
+                await supabase.from('social_profiles').insert(newSocials);
             }
 
         } else {
@@ -209,8 +327,8 @@ async function processBatch(): Promise<number> {
 }
 
 async function main() {
-    console.log('\n🎵 Spotify Social Profile Enricher (RapidAPI Overview)');
-    console.log('========================================================');
+    console.log('\n🎵 Spotify Super-Enricher (Media, Events, Discovery)');
+    console.log('=====================================================');
 
     const { count: total } = await supabase
         .from('social_profiles')
@@ -218,7 +336,7 @@ async function main() {
         .eq('social_type', 'Spotify')
         .is('status', null);
 
-    console.log(`📊 Spotify profiles to enrich: ~${total || 0}`);
+    console.log(`📊 Spotify profiles to process: ~${total || 0}`);
 
     let totalProcessed = 0;
 
@@ -229,7 +347,7 @@ async function main() {
         process.stdout.write(`\r   ✅ Total processed this run: ${totalProcessed}`);
     }
 
-    console.log(`\n\n✨ Done! Enriched ${totalProcessed} Spotify social profiles.`);
+    console.log(`\n\n✨ Done! Enriched ${totalProcessed} Spotify profiles and expanded the database.`);
 }
 
 main().catch(err => {
