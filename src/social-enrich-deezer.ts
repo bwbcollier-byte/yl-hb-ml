@@ -5,11 +5,7 @@ import { supabase } from './supabase';
 dotenv.config();
 
 /**
- * DEEZER SOCIAL ENRICHER (RapidAPI Version - SUPER BATCHED)
- * 
- * 1. Reads from social_profiles WHERE social_type = 'Deezer' AND status IS NULL
- * 2. Hits RapidAPI (deezerdevs) sequentially to respect rate limits.
- * 3. Accumulates all updates and performs ONE bulk database call at the end of the batch.
+ * DEEZER SOCIAL ENRICHER (V3 - AUDIT LOGGING VERSION)
  */
 
 const BATCH_SIZE = 50; 
@@ -23,7 +19,7 @@ const RAPID_API_KEYS = [
     '4146451f26mshca24e2bfa13bff4p1aab81jsn84d33f841460',
     '8be5f006c9mshd812675480db254p1b653ejsn602cc9149241',
     '2a6da923bamsh0840070fa506709p145861jsnae8888e67f00',
-    '89039e9cd5msh7d53bf9623df131p1191ccjsnd5baa1efdd82', // Unique key
+    '89039e9cd5msh7d53bf9623df131p1191ccjsnd5baa1efdd82', 
     'cea3641b50msh52581f483562ccdp186ee6jsn6759e8241393',
     '8f8ab324eamsh88b8de70b402e0cp1d7d0ajsn13c934eadbd9',
     '4030dde5ddmshe67eb1d7832914dp17c97ajsndaa5b65ce7d4',
@@ -38,30 +34,19 @@ function getNextKey() {
     return key;
 }
 
+const today = new Date().toLocaleDateString();
+
 async function fetchDeezerArtist(socialId: string): Promise<any> {
     const key = getNextKey();
     const url = `https://deezerdevs-deezer.p.rapidapi.com/artist/${socialId}`;
 
     try {
-        const res = await fetch(url, {
-            headers: {
-                'x-rapidapi-host': 'deezerdevs-deezer.p.rapidapi.com',
-                'x-rapidapi-key': key,
-            },
-        });
-
-        if (res.status === 429) {
-            console.log('\n   ⏳ Rate limited on Deezer key. Trying next...');
-            return fetchDeezerArtist(socialId);
-        }
-
+        const res = await fetch(url, { headers: { 'x-rapidapi-host': 'deezerdevs-deezer.p.rapidapi.com', 'x-rapidapi-key': key } });
+        if (res.status === 429) return fetchDeezerArtist(socialId);
         if (!res.ok) return null;
         const data: any = await res.json();
-        if (data.error) return null;
-        return data;
-    } catch {
-        return null;
-    }
+        return data.error ? null : data;
+    } catch { return null; }
 }
 
 async function searchDeezerArtist(name: string): Promise<any> {
@@ -69,39 +54,26 @@ async function searchDeezerArtist(name: string): Promise<any> {
     const url = `https://deezerdevs-deezer.p.rapidapi.com/search/artist?q=${encodeURIComponent(name)}`;
 
     try {
-        const res = await fetch(url, {
-            headers: {
-                'x-rapidapi-host': 'deezerdevs-deezer.p.rapidapi.com',
-                'x-rapidapi-key': key,
-            },
-        });
-
-        if (res.status === 429) {
-            console.log('\n   ⏳ Rate limited on Deezer search. Trying next...');
-            return searchDeezerArtist(name);
-        }
-
+        const res = await fetch(url, { headers: { 'x-rapidapi-host': 'deezerdevs-deezer.p.rapidapi.com', 'x-rapidapi-key': key } });
+        if (res.status === 429) return searchDeezerArtist(name);
         if (!res.ok) return null;
         const data: any = await res.json();
         if (!data.data || data.data.length === 0) return null;
-        
         const bestMatch = data.data.find((a: any) => a.name.toLowerCase() === name.toLowerCase());
         return bestMatch || data.data[0];
-    } catch {
-        return null;
-    }
+    } catch { return null; }
 }
 
 async function processBatch(): Promise<number> {
     const { data: profiles, error } = await supabase
         .from('social_profiles')
-        .select('id, social_id, talent_id, name')
+        .select('id, social_id, talent_id, name, processed_updates')
         .eq('social_type', 'Deezer')
-        .or('status.is.null,and(status.neq.Done,status.neq.DONE,status.neq.Error)')
+        .or('status.is.null,status.neq.done') // Look for anything that isn't 'done'
         .limit(BATCH_SIZE);
 
     if (error) {
-        console.error('❌ Error fetching Deezer profiles:', error.message);
+        console.error('❌ Error fetching profiles:', error.message);
         return 0;
     }
 
@@ -110,89 +82,68 @@ async function processBatch(): Promise<number> {
     const socialUpdates: any[] = [];
 
     for (const profile of profiles) {
-        const artistName = profile.name || profile.social_id || profile.id;
-
-        let data = null;
-        if (profile.social_id) {
-            data = await fetchDeezerArtist(profile.social_id);
-        } else if (profile.name) {
-            data = await searchDeezerArtist(profile.name);
-        }
+        const data = await (profile.social_id ? fetchDeezerArtist(profile.social_id) : searchDeezerArtist(profile.name!));
 
         if (data) {
-            const finalName = data.name || profile.name;
-            const cleanUsername = finalName.toLowerCase().replace(/[^a-z0-9]/g, '');
+            const artistName = data.name || profile.name;
+            const logEntry = `${today} - Processed and updated fans (${data.nb_fan || 0}) and albums (${data.nb_album || 0}).`;
+            const fullHistory = profile.processed_updates ? `${logEntry}\n${profile.processed_updates}` : logEntry;
 
-            console.log(`   ✅ Enriched: ${finalName.padEnd(25)} | 👥 ${String(data.nb_fan || 0).padEnd(8)} fans | 💿 ${String(data.nb_album || 0).padEnd(4)} albums`);
+            console.log(`   ✅ [AUDIT] ${artistName.padEnd(20)} | fans: ${data.nb_fan}`);
 
             socialUpdates.push({
                 id: profile.id,
-                name: finalName,
+                name: artistName,
                 social_id: data.id ? String(data.id) : profile.social_id,
-                username: cleanUsername,
+                username: artistName.toLowerCase().replace(/[^a-z0-9]/g, ''),
                 social_image: data.picture_xl || data.picture_medium || null,
                 followers_count: data.nb_fan || null,
                 media_count: data.nb_album || null,
                 social_url: data.link || `https://www.deezer.com/artist/${data.id || profile.social_id}`,
-                status: 'Done',
-                last_checked: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
+                status: 'done', // Uniform lowercase
+                last_processed: new Date().toISOString(),
+                processed_updates: fullHistory.slice(0, 1000) // Keep history manageable
             });
 
         } else {
-            console.log(`   ❌ Failed:   ${String(artistName).slice(0, 25).padEnd(25)} | (No results or API error)`);
+            console.log(`   ❌ [FAIL]  ${(profile.name || profile.id).slice(0, 20)}`);
             socialUpdates.push({
                 id: profile.id,
-                status: 'Error',
-                last_checked: new Date().toISOString(),
+                status: 'error',
+                last_processed: new Date().toISOString(),
+                processed_updates: `${today} - Failed: Artist not found or API error.`
             });
         }
-
         await sleep(SLEEP_MS);
     }
 
-    // 🚀 BULK UPDATE
     if (socialUpdates.length > 0) {
-        const { error: updateError } = await supabase
-            .from('social_profiles')
-            .upsert(socialUpdates);
-        
-        if (updateError) {
-            console.error('\n❌ Bulk Update Error:', updateError.message);
-        } else {
-            console.log(`\n   📦 Batch written: ${socialUpdates.length} records updated in database.`);
-        }
+        await supabase.from('social_profiles').upsert(socialUpdates);
+        console.log(`   📉 Batch of ${socialUpdates.length} written to Audit Trail.`);
     }
 
     return profiles.length;
 }
 
 async function main() {
-    console.log('\n🎵 Deezer Social Profile Enricher (VERBOSE LOGGING)');
-    console.log('================================================');
+    console.log('\n🎵 Deezer Social Profile Enricher (AUDIT LOGGING V3)');
+    console.log('===================================================');
 
-    const { count: total, error: countErr } = await supabase
+    const { count: total } = await supabase
         .from('social_profiles')
         .select('id', { count: 'exact', head: true })
         .eq('social_type', 'Deezer')
-        .or('status.is.null,and(status.neq.Done,status.neq.DONE,status.neq.Error)');
+        .or('status.is.null,status.neq.done');
 
-    console.log(`📊 Deezer profiles to enrich: ~${total || 0}`);
-
-    if (countErr) console.error('❌ Error counting profiles:', countErr.message);
+    console.log(`📊 Deezer profiles to audit: ~${total || 0}`);
 
     let totalProcessed = 0;
     while (true) {
         const count = await processBatch();
         if (count === 0) break;
         totalProcessed += count;
-        console.log(`   📉 Total Progress: ${totalProcessed} processed. Remaining: ~${(total || 0) - totalProcessed}`);
     }
-
-    console.log(`\n\n✨ Done! Enriched ${totalProcessed} Deezer social profiles.`);
+    console.log(`\n\n✨ Done! Audited ${totalProcessed} profiles.`);
 }
 
-main().catch(err => {
-    console.error('Fatal error:', err);
-    process.exit(1);
-});
+main().catch(err => { console.error('Fatal error:', err); process.exit(1); });
