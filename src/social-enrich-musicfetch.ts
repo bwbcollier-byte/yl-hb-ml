@@ -97,12 +97,14 @@ async function processBatch(token: string): Promise<number> {
                     linking_status: 'done',
                     created_at: new Date().toISOString()
                 });
+                console.log(`   ✨ Created MusicFetch profile (Bio/About stored)`);
             } else {
                 await supabase.from('social_profiles').update({
                     social_about: result.description,
                     social_image: result.image?.url,
                     updated_at: new Date().toISOString()
                 }).eq('id', existingMF.id);
+                console.log(`   📝 Updated MusicFetch profile (Bio/About refreshed)`);
             }
 
             // 2. Update Talent Metadata
@@ -113,6 +115,7 @@ async function processBatch(token: string): Promise<number> {
             
             if (Object.keys(talentUpdate).length > 0) {
                 await supabase.from('talent_profiles').update(talentUpdate).eq('id', profile.talent_id);
+                console.log(`   👤 Updated Talent: ${Object.keys(talentUpdate).join(', ')}`);
             }
 
             // 3. Discovery/Linking (All other platforms)
@@ -148,7 +151,7 @@ async function processBatch(token: string): Promise<number> {
                             created_at: new Date().toISOString(),
                             updated_at: new Date().toISOString()
                         });
-                        console.log(`   ✨ Created ${sType}`);
+                        console.log(`   ✨ Created ${sType} (ID: ${sId || 'URL only'})`);
                     } else {
                         // UPDATE MISSING VALUES
                         const updateObj: any = {};
@@ -162,6 +165,7 @@ async function processBatch(token: string): Promise<number> {
                                 ...updateObj,
                                 updated_at: new Date().toISOString()
                             }).eq('id', existing.id);
+                            console.log(`   🔄 Updated ${sType}: ${Object.keys(updateObj).join(', ')}`);
                         }
                     }
                 }
