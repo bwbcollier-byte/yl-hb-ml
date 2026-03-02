@@ -19,11 +19,18 @@ const SLEEP_MS = 200;
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 const RAPID_API_KEYS = [
-    'c83516b3acmshdfd6347a5914a11p17e517jsn06a3c5de8b13',
     '7f039e9cd5msh7d53bf9623df131p1191ccjsnd5baa1efdd82',
     '0be625e0dbmshe3f58bae0a1b103p1a9cb4jsn8f4252e04b42',
     'bfb3e64505mshd9c819df5fb856fp18e4f4jsn98cea7554500',
-    '4146451f26mshca24e2bfa13bff4p1aab81jsn84d33f841460'
+    '4146451f26mshca24e2bfa13bff4p1aab81jsn84d33f841460',
+    '8be5f006c9mshd812675480db254p1b653ejsn602cc9149241',
+    '2a6da923bamsh0840070fa506709p145861jsnae8888e67f00',
+    '0be625e0dbmshe3f58bae0a1b103p1a9cb4jsn8f4252e04b42',
+    'cea3641b50msh52581f483562ccdp186ee6jsn6759e8241393',
+    '8f8ab324eamsh88b8de70b402e0cp1d7d0ajsn13c934eadbd9',
+    '4030dde5ddmshe67eb1d7832914dp17c97ajsndaa5b65ce7d4',
+    '730a02e172msh79ca9cab92fe41dp1b34a2jsnd53411309cd7',
+    'c83516b3acmshdfd6347a5914a11p17e517jsn06a3c5de8b13'
 ];
 
 let currentKeyIndex = 0;
@@ -64,7 +71,7 @@ async function processBatch(): Promise<number> {
         .from('social_profiles')
         .select('id, social_id, talent_id, name')
         .eq('social_type', 'Deezer')
-        .is('status', null)
+        .not('status', 'in', '("Done","Error")')
         .not('social_id', 'is', null)
         .neq('social_id', '')
         .limit(BATCH_SIZE);
@@ -116,9 +123,9 @@ async function main() {
 
     const { count: total } = await supabase
         .from('social_profiles')
-        .select('id', { count: 'estimated', head: true })
+        .select('id', { count: 'exact', head: true })
         .eq('social_type', 'Deezer')
-        .is('status', null);
+        .not('status', 'in', '("Done","Error")');
 
     console.log(`📊 Deezer profiles to enrich: ~${total || 0}`);
 
