@@ -65,11 +65,14 @@ async function searchDeezerArtist(name: string): Promise<any> {
 }
 
 async function processBatch(): Promise<number> {
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
     const { data: profiles, error } = await supabase
         .from('social_profiles')
         .select('id, social_id, talent_id, name, processed_updates')
         .eq('social_type', 'Deezer')
-        .order('last_processed', { ascending: true, nullsFirst: true }) // 🔥 NEW PRIORITY LOGIC
+        .or(`last_processed.is.null,last_processed.lt.${yesterday}`) // 🔥 SKIP IF PROCESSED WITHIN LAST 24H
+        .order('last_processed', { ascending: true, nullsFirst: true })
         .limit(BATCH_SIZE);
 
     if (error) {
@@ -126,16 +129,19 @@ async function processBatch(): Promise<number> {
 }
 
 async function main() {
-    console.log('\n🎵 Deezer Social Profile Enricher (CONTINUOUS CYCLE V4)');
-    console.log('=====================================================');
+    console.log('\n🎵 Deezer Social Profile Enricher (24H FRESHNESS V5)');
+    console.log('====================================================');
+
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
     const { count: total, error: countErr } = await supabase
         .from('social_profiles')
         .select('id', { count: 'exact', head: true })
-        .eq('social_type', 'Deezer');
+        .eq('social_type', 'Deezer')
+        .or(`last_processed.is.null,last_processed.lt.${yesterday}`);
 
-    console.log(`📊 Total Deezer profiles in queue: ~${total || 0}`);
-    console.log(`ℹ️  Processing order: Never checked first, then oldest checks last.`);
+    console.log(`📊 Deezer profiles to refresh (>24h ago): ~${total || 0}`);
+    console.log(`ℹ️  Processing order: Never checked first, then oldest checks.`);
 
     if (countErr) console.error('❌ Error counting profiles:', countErr.message);
 
