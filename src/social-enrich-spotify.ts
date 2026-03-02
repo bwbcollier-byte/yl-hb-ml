@@ -51,7 +51,8 @@ const RAPID_API_HOSTS = [
     'spotify23.p.rapidapi.com',
     'spotify-data.p.rapidapi.com',
     'spotify-web-api3.p.rapidapi.com',
-    'real-time-spotify-data-scraper.p.rapidapi.com'
+    'real-time-spotify-data-scraper.p.rapidapi.com',
+    'spotify-web2.p.rapidapi.com'
 ];
 
 let currentHostIndex = 0;
