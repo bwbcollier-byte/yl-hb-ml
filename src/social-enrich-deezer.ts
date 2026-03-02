@@ -97,7 +97,7 @@ async function processBatch(): Promise<number> {
         .from('social_profiles')
         .select('id, social_id, talent_id, name')
         .eq('social_type', 'Deezer')
-        .not('status', 'in', '("Done","Error")')
+        .or('status.is.null,status.neq.Done,status.neq.DONE,status.neq.Error')
         .limit(BATCH_SIZE);
 
     if (error) {
