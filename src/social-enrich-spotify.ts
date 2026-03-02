@@ -46,20 +46,33 @@ const PLATFORM_MAP: Record<string, string> = {
     'SOUNDCLOUD': 'Soundcloud',
 };
 
+const RAPID_API_HOSTS = [
+    'spotify81.p.rapidapi.com',
+    'spotify23.p.rapidapi.com'
+];
+
+let currentHostIndex = 0;
+function getNextHost() {
+    const host = RAPID_API_HOSTS[currentHostIndex];
+    currentHostIndex = (currentHostIndex + 1) % RAPID_API_HOSTS.length;
+    return host;
+}
+
 async function fetchSpotifyArtistOverview(spotifyId: string): Promise<any> {
     const key = getNextKey();
-    const url = `https://spotify81.p.rapidapi.com/artist_overview?id=${spotifyId}`;
+    const host = getNextHost();
+    const url = `https://${host}/artist_overview?id=${spotifyId}`;
 
     try {
         const res = await fetch(url, {
             headers: {
-                'x-rapidapi-host': 'spotify81.p.rapidapi.com',
+                'x-rapidapi-host': host,
                 'x-rapidapi-key': key,
             },
         });
 
         if (res.status === 429) {
-            console.log('\n   ⏳ Rate limited on this key. Trying next...');
+            console.log(`\n   ⏳ Rate limited on ${host}. Trying next...`);
             return fetchSpotifyArtistOverview(spotifyId);
         }
 
@@ -102,7 +115,7 @@ async function processBatch(): Promise<number> {
         .from('social_profiles')
         .select('id, social_id, talent_id, name')
         .eq('social_type', 'Spotify')
-        .is('status', null)
+        .not('status', 'in', '("Done","Error")') // Pick up active, pending, or null
         .not('social_id', 'is', null)
         .neq('social_id', '')
         .limit(BATCH_SIZE);
@@ -334,7 +347,7 @@ async function main() {
         .from('social_profiles')
         .select('id', { count: 'estimated', head: true })
         .eq('social_type', 'Spotify')
-        .is('status', null);
+        .not('status', 'in', '("Done","Error")');
 
     console.log(`📊 Spotify profiles to process: ~${total || 0}`);
 
