@@ -173,7 +173,7 @@ async function main() {
         .from('social_profiles')
         .select('id', { count: 'exact', head: true })
         .eq('social_type', 'Deezer')
-        .or('status.is.null,status.neq.Done,status.neq.DONE,status.neq.Error');
+        .or('status.is.null,and(status.neq.Done,status.neq.DONE,status.neq.Error)');
 
     console.log(`📊 Deezer profiles to enrich: ~${total || 0}`);
 
