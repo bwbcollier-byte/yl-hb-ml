@@ -169,21 +169,21 @@ async function main() {
     console.log('\n🎵 Deezer Social Profile Enricher (SUPER BATCHED)');
     console.log('================================================');
 
-    const { count: total } = await supabase
+    const { count: total, error: countErr } = await supabase
         .from('social_profiles')
         .select('id', { count: 'exact', head: true })
         .eq('social_type', 'Deezer')
-        .not('status', 'in', '("Done","Error")');
+        .or('status.is.null,status.neq.Done,status.neq.DONE,status.neq.Error');
 
     console.log(`📊 Deezer profiles to enrich: ~${total || 0}`);
 
-    let totalProcessed = 0;
+    if (countErr) console.error('❌ Error counting profiles:', countErr.message);
 
+    let totalProcessed = 0;
     while (true) {
         const count = await processBatch();
         if (count === 0) break;
         totalProcessed += count;
-        process.stdout.write(`\r   📊 Total processed: ${totalProcessed}`);
     }
 
     console.log(`\n\n✨ Done! Enriched ${totalProcessed} Deezer social profiles.`);
