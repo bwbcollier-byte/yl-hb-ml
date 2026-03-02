@@ -6,7 +6,7 @@ import readline from 'readline';
 dotenv.config();
 
 /**
- * MUSICFETCH MASTER ENRICHER (V2.2 - SUPER BATCHED & TRACKED)
+ * MUSICFETCH MASTER ENRICHER (V2.3 - VERBOSE DEBUGGING)
  */
 
 const BATCH_SIZE = 20;
@@ -30,15 +30,26 @@ async function fetchMusicFetch(spotifyUrl: string, token: string) {
         const res = await fetch(url, {
             headers: { 'x-token': token }
         });
+        
         if (res.status === 429) {
             console.log('\n   ⏳ MusicFetch Rate limited. Sleeping 15s...');
             await sleep(15000);
             return fetchMusicFetch(spotifyUrl, token);
         }
-        if (!res.ok) return null;
+
+        if (res.status === 401 || res.status === 403) {
+            console.error(`\n❌ API AUTH ERROR (${res.status}): Your token appears to be invalid or expired.`);
+            process.exit(1);
+        }
+
+        if (!res.ok) {
+            console.log(`\n   ⚠️ API Error ${res.status} for ${spotifyUrl}`);
+            return null;
+        }
+
         return await res.json();
     } catch (error) {
-        console.error('❌ MusicFetch Network Error:', error);
+        console.error('\n❌ MusicFetch Network Error:', error);
         return null;
     }
 }
@@ -48,7 +59,7 @@ async function processBatch(token: string): Promise<number> {
         .from('social_profiles')
         .select('id, social_url, social_id, talent_id, name')
         .eq('social_type', 'Spotify')
-        .is('mf_check', null) // 🔥 ENSURE WE ONLY GET NEW ROWS
+        .is('mf_check', null)
         .not('social_url', 'is', null)
         .limit(BATCH_SIZE);
 
@@ -153,26 +164,26 @@ async function processBatch(token: string): Promise<number> {
                     }
                 }
             }
+        } else {
+            process.stdout.write(` (No data found)`);
         }
-        // 🔥 Track progress ALWAYS (setting mf_check)
+
+        // Always mark as checked to prevent infinite re-trying of dead links
         spotifyRowUpdates.push({ id: profile.id, mf_check: new Date().toISOString() });
 
         await sleep(SLEEP_MS);
     }
 
-    // 🚀 EXECUTE BULK OPS WITH ERROR HANDLING
+    // 🚀 EXECUTE BULK OPS
     try {
         if (talentUpdates.length > 0) await supabase.from('talent_profiles').upsert(talentUpdates);
         if (socialInserts.length > 0) await supabase.from('social_profiles').insert(socialInserts);
         if (socialUpdates.length > 0) await supabase.from('social_profiles').upsert(socialUpdates);
-        if (spotifyRowUpdates.length > 0) {
-            const { error: trackErr } = await supabase.from('social_profiles').upsert(spotifyRowUpdates);
-            if (trackErr) console.error('\n❌ DB Error marking progress:', trackErr.message);
-        }
+        if (spotifyRowUpdates.length > 0) await supabase.from('social_profiles').upsert(spotifyRowUpdates);
 
-        console.log(`\n   ✅ Batch Complete: ${spotifyRowUpdates.length} Marked checked | ${talentUpdates.length} Talent upd | ${socialInserts.length} Social new | ${socialUpdates.length} Social upd.`);
+        console.log(`\n   ✅ Batch Complete: ${spotifyRowUpdates.length} Checked | ${talentUpdates.length} Talent upd | ${socialInserts.length} Social new | ${socialUpdates.length} Social upd.`);
     } catch (e: any) {
-        console.error('\n❌ Database Batch Failure:', e.message);
+        console.error('\n❌ Local Database Error:', e.message);
     }
 
     return spotifyProfiles.length;
@@ -216,7 +227,7 @@ function askToken(): Promise<string> {
 }
 
 async function main() {
-    console.log('\n🎧 MusicFetch Master Linker & Talent Enricher (SUPER BATCHED)');
+    console.log('\n🎧 MusicFetch Master Linker & Talent Enricher (VERIFYING DATA)');
     console.log('============================================================');
 
     const token = await askToken();
