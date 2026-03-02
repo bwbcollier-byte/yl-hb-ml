@@ -50,7 +50,8 @@ const RAPID_API_HOSTS = [
     'spotify81.p.rapidapi.com',
     'spotify23.p.rapidapi.com',
     'spotify-data.p.rapidapi.com',
-    'spotify-web-api3.p.rapidapi.com'
+    'spotify-web-api3.p.rapidapi.com',
+    'real-time-spotify-data-scraper.p.rapidapi.com'
 ];
 
 let currentHostIndex = 0;
@@ -65,7 +66,7 @@ async function fetchSpotifyArtistOverview(spotifyId: string): Promise<any> {
     const host = getNextHost();
     
     // Handle different API formats
-    let url = `https://${host}/artist_overview?id=${spotifyId}`;
+    let url = `https://${host}/artist_overview/?id=${spotifyId}`;
     let options: any = {
         headers: {
             'x-rapidapi-host': host,
