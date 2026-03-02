@@ -5,17 +5,15 @@ import { supabase } from './supabase';
 dotenv.config();
 
 /**
- * DEEZER SOCIAL ENRICHER (RapidAPI Version)
+ * DEEZER SOCIAL ENRICHER (RapidAPI Version - SUPER BATCHED)
  * 
  * 1. Reads from social_profiles WHERE social_type = 'Deezer' AND status IS NULL
- * 2. Hits RapidAPI (deezerdevs) to get artist data
- * 3. Updates record with image, followers, clean username
- * 4. (Note: Deezer API doesn't usually provide external links directly in the main artist call, 
- *    but we keep the structure consistent).
+ * 2. Hits RapidAPI (deezerdevs) sequentially to respect rate limits.
+ * 3. Accumulates all updates and performs ONE bulk database call at the end of the batch.
  */
 
-const BATCH_SIZE = 100;
-const SLEEP_MS = 200;
+const BATCH_SIZE = 50; 
+const SLEEP_MS = 200; 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 const RAPID_API_KEYS = [
@@ -87,7 +85,6 @@ async function searchDeezerArtist(name: string): Promise<any> {
         const data: any = await res.json();
         if (!data.data || data.data.length === 0) return null;
         
-        // Pick best match - exact name or first result
         const bestMatch = data.data.find((a: any) => a.name.toLowerCase() === name.toLowerCase());
         return bestMatch || data.data[0];
     } catch {
@@ -110,8 +107,10 @@ async function processBatch(): Promise<number> {
 
     if (!profiles || profiles.length === 0) return 0;
 
+    const socialUpdates: any[] = [];
+
     for (const profile of profiles) {
-        process.stdout.write(`\r   🎵 Processing: ${profile.name || profile.social_id}...`);
+        process.stdout.write(`\r   🎵 Deezer: ${profile.name || profile.social_id || profile.id}...`);
 
         let data = null;
         if (profile.social_id) {
@@ -124,7 +123,8 @@ async function processBatch(): Promise<number> {
             const artistName = data.name || profile.name;
             const cleanUsername = artistName.toLowerCase().replace(/[^a-z0-9]/g, '');
 
-            await supabase.from('social_profiles').update({
+            socialUpdates.push({
+                id: profile.id,
                 name: artistName,
                 social_id: data.id ? String(data.id) : profile.social_id,
                 username: cleanUsername,
@@ -135,24 +135,38 @@ async function processBatch(): Promise<number> {
                 status: 'Done',
                 last_checked: new Date().toISOString(),
                 updated_at: new Date().toISOString(),
-            }).eq('id', profile.id);
+            });
 
         } else {
-            await supabase.from('social_profiles').update({
+            socialUpdates.push({
+                id: profile.id,
                 status: 'Error',
                 last_checked: new Date().toISOString(),
-            }).eq('id', profile.id);
+            });
         }
 
         await sleep(SLEEP_MS);
+    }
+
+    // 🚀 BULK UPDATE
+    if (socialUpdates.length > 0) {
+        const { error: updateError } = await supabase
+            .from('social_profiles')
+            .upsert(socialUpdates);
+        
+        if (updateError) {
+            console.error('\n❌ Bulk Update Error:', updateError.message);
+        } else {
+            process.stdout.write(`\n   ✅ Batched ${socialUpdates.length} updates to DB.`);
+        }
     }
 
     return profiles.length;
 }
 
 async function main() {
-    console.log('\n🎵 Deezer Social Profile Enricher');
-    console.log('===================================');
+    console.log('\n🎵 Deezer Social Profile Enricher (SUPER BATCHED)');
+    console.log('================================================');
 
     const { count: total } = await supabase
         .from('social_profiles')
@@ -168,7 +182,7 @@ async function main() {
         const count = await processBatch();
         if (count === 0) break;
         totalProcessed += count;
-        process.stdout.write(`\r   ✅ Processed ${totalProcessed} Deezer profiles...`);
+        process.stdout.write(`\r   📊 Total processed: ${totalProcessed}`);
     }
 
     console.log(`\n\n✨ Done! Enriched ${totalProcessed} Deezer social profiles.`);
