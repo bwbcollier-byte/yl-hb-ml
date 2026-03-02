@@ -114,25 +114,48 @@ async function processBatch(): Promise<number> {
 
         if (artist) {
             // 1. Update the Spotify record itself
-            const avatarUrl = artist.visuals?.avatarImage?.sources?.[0]?.url || null;
-            const bio = artist.profile?.biography?.text || null;
-            const followers = artist.stats?.followers || null;
-            const artistName = artist.profile?.name || profile.name;
+            const profile = artist.profile || {};
+            const stats = artist.stats || {};
+            const visuals = artist.visuals || {};
+
+            const avatarUrl = visuals.avatarImage?.sources?.[0]?.url || null; // Avatar usually only has 1 main
+            const bio = profile.biography?.text || null;
+            const followers = stats.followers || null;
+            const monthlyListeners = stats.monthlyListeners || null;
+            const worldRank = stats.worldRank || null;
+            const isVerified = profile.verified || false;
+
+            // Gallery: Pick the largest source for each item
+            const gallery = visuals.gallery?.items?.map((item: any) => {
+                const sources = item.sources || [];
+                // Sort by width descending to find the largest
+                const largest = [...sources].sort((a: any, b: any) => (b.width || 0) - (a.width || 0))[0];
+                return largest?.url;
+            }).filter(Boolean) || [];
+
+            const topCities = stats.topCities?.items || [];
+            
+            const artistName = profile.name || profile.name;
             const cleanUsername = artistName.toLowerCase().replace(/[^a-z0-9]/g, '');
 
             await supabase.from('social_profiles').update({
                 name: artistName,
                 username: cleanUsername,
+                verified: isVerified,
                 social_image: avatarUrl,
                 social_about: bio ? bio.slice(0, 5000) : null,
                 followers_count: followers,
+                following: monthlyListeners, // Mapping monthlyListeners to following as requested
+                social_rank: worldRank, // Mapping worldRank to rank
+                images: gallery, 
+                top_cities: topCities, 
                 status: 'Done',
                 last_checked: new Date().toISOString(),
                 updated_at: new Date().toISOString()
             }).eq('id', profile.id);
 
             // 2. Discover and create other links
-            const externalLinks = artist.profile?.externalLinks?.items || [];
+            const externalLinks = profile.externalLinks?.items || [];
             const newSocials: any[] = [];
 
             for (const link of externalLinks) {
