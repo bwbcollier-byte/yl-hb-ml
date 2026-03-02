@@ -138,6 +138,7 @@ async function processBatch(): Promise<number> {
             });
 
         } else {
+            console.log(`   ❌ Failed: ${profile.name || profile.id} (No results or API error)`);
             socialUpdates.push({
                 id: profile.id,
                 status: 'Error',
