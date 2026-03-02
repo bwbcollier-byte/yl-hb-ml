@@ -69,7 +69,7 @@ async function processBatch(): Promise<number> {
         .from('social_profiles')
         .select('id, social_id, talent_id, name, processed_updates')
         .eq('social_type', 'Deezer')
-        .or('status.is.null,status.neq.done') // Look for anything that isn't 'done'
+        .order('last_processed', { ascending: true, nullsFirst: true }) // 🔥 NEW PRIORITY LOGIC
         .limit(BATCH_SIZE);
 
     if (error) {
@@ -86,10 +86,10 @@ async function processBatch(): Promise<number> {
 
         if (data) {
             const artistName = data.name || profile.name;
-            const logEntry = `${today} - Processed and updated fans (${data.nb_fan || 0}) and albums (${data.nb_album || 0}).`;
+            const logEntry = `${today} - Updated fans (${data.nb_fan || 0}) and albums (${data.nb_album || 0}).`;
             const fullHistory = profile.processed_updates ? `${logEntry}\n${profile.processed_updates}` : logEntry;
 
-            console.log(`   ✅ [AUDIT] ${artistName.padEnd(20)} | fans: ${data.nb_fan}`);
+            console.log(`   ✅ [AUDIT] ${artistName.padEnd(25)} | fans: ${String(data.nb_fan).padEnd(8)}`);
 
             socialUpdates.push({
                 id: profile.id,
@@ -100,17 +100,17 @@ async function processBatch(): Promise<number> {
                 followers_count: data.nb_fan || null,
                 media_count: data.nb_album || null,
                 social_url: data.link || `https://www.deezer.com/artist/${data.id || profile.social_id}`,
-                status: 'done', // Uniform lowercase
+                status: 'done',
                 last_processed: new Date().toISOString(),
-                processed_updates: fullHistory.slice(0, 1000) // Keep history manageable
+                processed_updates: fullHistory.slice(0, 1000)
             });
 
         } else {
-            console.log(`   ❌ [FAIL]  ${(profile.name || profile.id).slice(0, 20)}`);
+            console.log(`   ❌ [FAIL]  ${(profile.name || profile.id).slice(0, 25)}`);
             socialUpdates.push({
                 id: profile.id,
                 status: 'error',
-                last_processed: new Date().toISOString(),
+                last_processed: new Date().toISOString(), // Still update timestamp to move to back of queue
                 processed_updates: `${today} - Failed: Artist not found or API error.`
             });
         }
@@ -119,23 +119,25 @@ async function processBatch(): Promise<number> {
 
     if (socialUpdates.length > 0) {
         await supabase.from('social_profiles').upsert(socialUpdates);
-        console.log(`   📉 Batch of ${socialUpdates.length} written to Audit Trail.`);
+        console.log(`   📉 Batch of ${socialUpdates.length} updated in Audit Trail.`);
     }
 
     return profiles.length;
 }
 
 async function main() {
-    console.log('\n🎵 Deezer Social Profile Enricher (AUDIT LOGGING V3)');
-    console.log('===================================================');
+    console.log('\n🎵 Deezer Social Profile Enricher (CONTINUOUS CYCLE V4)');
+    console.log('=====================================================');
 
-    const { count: total } = await supabase
+    const { count: total, error: countErr } = await supabase
         .from('social_profiles')
         .select('id', { count: 'exact', head: true })
-        .eq('social_type', 'Deezer')
-        .or('status.is.null,status.neq.done');
+        .eq('social_type', 'Deezer');
 
-    console.log(`📊 Deezer profiles to audit: ~${total || 0}`);
+    console.log(`📊 Total Deezer profiles in queue: ~${total || 0}`);
+    console.log(`ℹ️  Processing order: Never checked first, then oldest checks last.`);
+
+    if (countErr) console.error('❌ Error counting profiles:', countErr.message);
 
     let totalProcessed = 0;
     while (true) {
