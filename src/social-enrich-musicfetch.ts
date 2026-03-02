@@ -6,19 +6,11 @@ import readline from 'readline';
 dotenv.config();
 
 /**
- * MUSICFETCH MASTER ENRICHER (V2.1 - SUPER BATCHED)
- * 
- * 1. Finds Spotify profiles where mf_check is NULL
- * 2. Hits MusicFetch API with deep-field parameters
- * 3. BATCHES all database operations to minimize round-trips:
- *    - All existing social profiles are pre-fetched in 1 call per batch.
- *    - All talent updates are executed in 1 bulk call.
- *    - All new social profiles are inserted in 1 bulk call.
- *    - All existing social profile updates are executed in 1 bulk call.
+ * MUSICFETCH MASTER ENRICHER (V2.2 - SUPER BATCHED & TRACKED)
  */
 
 const BATCH_SIZE = 20;
-const SLEEP_MS = 1600; // ~37.5 requests per minute
+const SLEEP_MS = 1600; 
 
 const rl = readline.createInterface({
     input: process.stdin,
@@ -56,7 +48,7 @@ async function processBatch(token: string): Promise<number> {
         .from('social_profiles')
         .select('id, social_url, social_id, talent_id, name')
         .eq('social_type', 'Spotify')
-        .is('mf_check', null)
+        .is('mf_check', null) // 🔥 ENSURE WE ONLY GET NEW ROWS
         .not('social_url', 'is', null)
         .limit(BATCH_SIZE);
 
@@ -67,14 +59,12 @@ async function processBatch(token: string): Promise<number> {
 
     if (!spotifyProfiles || spotifyProfiles.length === 0) return 0;
 
-    // PRE-FETCH all existing social profiles for this batch of talents
     const talentIds = spotifyProfiles.map(p => p.talent_id);
     const { data: existingSocials } = await supabase
         .from('social_profiles')
         .select('id, talent_id, social_type, social_id, social_url, social_image, social_about')
         .in('talent_id', talentIds);
 
-    // Organize existing socials by talent_id + social_type for O(1) lookup
     const socialMap = new Map<string, any>();
     existingSocials?.forEach(s => {
         socialMap.set(`${s.talent_id}_${s.social_type}`, s);
@@ -92,7 +82,7 @@ async function processBatch(token: string): Promise<number> {
         const result = data?.result;
 
         if (result) {
-            // 1. Prepare MusicFetch social_profile
+            // 1. MusicFetch Record
             const existingMF = socialMap.get(`${profile.talent_id}_MusicFetch`);
             if (!existingMF) {
                 socialInserts.push({
@@ -115,7 +105,7 @@ async function processBatch(token: string): Promise<number> {
                 });
             }
 
-            // 2. Prepare Talent Metadata
+            // 2. Talent Metadata
             const tUpdate: any = { id: profile.talent_id };
             let hasTChange = false;
             if (result.dateOfBirth) { tUpdate.dob = result.dateOfBirth; hasTChange = true; }
@@ -123,7 +113,7 @@ async function processBatch(token: string): Promise<number> {
             if (result.aliases && Array.isArray(result.aliases)) { tUpdate.aliases = result.aliases; hasTChange = true; }
             if (hasTChange) talentUpdates.push(tUpdate);
 
-            // 3. Prepare Discovery/Linking
+            // 3. Platform Discovery
             const services = result.services || {};
             for (const [sKey, sData] of Object.entries(services) as [string, any][]) {
                 const sType = mapServiceToType(sKey);
@@ -163,33 +153,27 @@ async function processBatch(token: string): Promise<number> {
                     }
                 }
             }
-
-            // Target Spotify row for tracking
-            spotifyRowUpdates.push({ id: profile.id, mf_check: new Date().toISOString() });
-
-        } else {
-            // Mark even on failure to avoid infinite loop
-            spotifyRowUpdates.push({ id: profile.id, mf_check: new Date().toISOString() });
         }
+        // 🔥 Track progress ALWAYS (setting mf_check)
+        spotifyRowUpdates.push({ id: profile.id, mf_check: new Date().toISOString() });
 
         await sleep(SLEEP_MS);
     }
 
-    // 🚀 EXECUTE BATCH DATABASE OPERATIONS
-    if (talentUpdates.length > 0) {
-        await supabase.from('talent_profiles').upsert(talentUpdates);
-    }
-    if (socialInserts.length > 0) {
-        await supabase.from('social_profiles').insert(socialInserts);
-    }
-    if (socialUpdates.length > 0) {
-        await supabase.from('social_profiles').upsert(socialUpdates);
-    }
-    if (spotifyRowUpdates.length > 0) {
-        await supabase.from('social_profiles').upsert(spotifyRowUpdates);
-    }
+    // 🚀 EXECUTE BULK OPS WITH ERROR HANDLING
+    try {
+        if (talentUpdates.length > 0) await supabase.from('talent_profiles').upsert(talentUpdates);
+        if (socialInserts.length > 0) await supabase.from('social_profiles').insert(socialInserts);
+        if (socialUpdates.length > 0) await supabase.from('social_profiles').upsert(socialUpdates);
+        if (spotifyRowUpdates.length > 0) {
+            const { error: trackErr } = await supabase.from('social_profiles').upsert(spotifyRowUpdates);
+            if (trackErr) console.error('\n❌ DB Error marking progress:', trackErr.message);
+        }
 
-    console.log(`\n   ✅ Batch Complete: ${talentUpdates.length} Talent updates, ${socialInserts.length} Social inserts, ${socialUpdates.length} Social updates.`);
+        console.log(`\n   ✅ Batch Complete: ${spotifyRowUpdates.length} Marked checked | ${talentUpdates.length} Talent upd | ${socialInserts.length} Social new | ${socialUpdates.length} Social upd.`);
+    } catch (e: any) {
+        console.error('\n❌ Database Batch Failure:', e.message);
+    }
 
     return spotifyProfiles.length;
 }
@@ -241,14 +225,21 @@ async function main() {
         process.exit(1);
     }
 
+    const { count: remaining } = await supabase
+        .from('social_profiles')
+        .select('id', { count: 'estimated', head: true })
+        .eq('social_type', 'Spotify')
+        .is('mf_check', null);
+
+    console.log(`📊 Spotify profiles remaining to check: ~${remaining || 0}`);
+
     let totalProcessed = 0;
     while (true) {
         const count = await processBatch(token);
         if (count === 0) break;
         totalProcessed += count;
-        // console.log output is handled inside processBatch
     }
-    console.log(`\n\n✨ Done! Enriched ${totalProcessed} artists.`);
+    console.log(`\n\n✨ Done! Finished checking ${totalProcessed} artists.`);
     rl.close();
 }
 
