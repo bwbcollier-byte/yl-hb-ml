@@ -138,7 +138,9 @@ async function processBatch(): Promise<number> {
             const stats = artist.stats || {};
             const visuals = artist.visuals || {};
 
-            const avatarUrl = visuals.avatarImage?.sources?.[0]?.url || null;
+            const avatarSources = visuals.avatarImage?.sources || [];
+            const largestAvatar = [...avatarSources].sort((a: any, b: any) => (b.width || 0) - (a.width || 0))[0];
+            const avatarUrl = largestAvatar?.url || null;
             const bio = apiProfile.biography?.text || null;
             const followers = stats.followers || null;
             const monthlyListeners = stats.monthlyListeners || null;
