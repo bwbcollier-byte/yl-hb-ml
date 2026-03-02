@@ -5,196 +5,190 @@ import { supabase } from './supabase';
 dotenv.config();
 
 /**
- * MUSICFETCH SOCIAL ENRICHER
+ * MUSICFETCH MASTER ENRICHER
  * 
- * Reads from social_profiles WHERE social_type = 'Spotify' AND status = 'Done'
- * Gets the social_id (Spotify Artist ID) and hits the MusicFetch API
- * For EACH platform link returned by MusicFetch, it creates/updates the matching
- * social_profiles row for that talent (e.g. their Deezer row, Instagram row, etc.)
- * This ONLY updates social_profiles — NOT talent_profiles
+ * 1. Finds Spotify profiles where mf_check is NULL
+ * 2. Hits MusicFetch API with deep-field parameters
+ * 3. Enriches:
+ *    - talent_profiles (dob, hometown, aliases)
+ *    - social_profiles (social_about, + discovery of other platforms)
+ * 4. Marks mf_check = NOW()
  */
 
-const BATCH_SIZE = 100;
-const SLEEP_MS = 2100; // MusicFetch: ~28 req/min (using 2.1s to be safe)
+const BATCH_SIZE = 20;
+const SLEEP_MS = 2100; // ~28 req/min for MusicFetch
+const MF_TOKEN = process.env.MUSICFETCH_TOKEN || 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJhY2NvdW50SWQiOiJhY2NvdW50XzJZZ0FveTdZY2dza1dVYUcwUzQwNG8iLCJpYXQiOjE3NzIyMTc5OTMuNDgxfQ.jZoVWVWDM2bcIc0Oq6V_t2fy2Q3XPp61Bc-9VQp7pq0';
+
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
-const MUSICFETCH_TOKEN = process.env.MUSICFETCH_TOKEN;
+async function fetchMusicFetch(spotifyUrl: string) {
+    const encodedUrl = encodeURIComponent(spotifyUrl);
+    // Added all parameters from your curl request
+    const services = 'spotify,appleMusic,amazon,amazonMusic,audiomack,bandcamp,beatport,boomplay,deezer,discogs,genius,iHeartRadio,instagram,youtubeMusic,youtube,tiktok,tidal,soundcloud,shazam,pandora,musicBrainz';
+    const fields = 'name,country,images,dateOfBirth,links,dateOfDeath,hometown,description,genres,shows,aliases';
+    
+    const url = `https://api.musicfetch.io/url?url=${encodedUrl}&services=${encodeURIComponent(services)}&country=US&withTracks=true&withDistributor=true&withPerformance=true&withCredits=true&withServiceLevel=${encodeURIComponent(fields)}`;
 
-// Map MusicFetch service keys → social_type in social_profiles
-const MF_TYPE_MAP: Record<string, string> = {
-    appleMusic: 'Apple Music',
-    instagram: 'Instagram',
-    facebook: 'Facebook',
-    twitter: 'Twitter',
-    x: 'Twitter',
-    youtube: 'YouTube',
-    youtubeMusic: 'YouTube',
-    tiktok: 'TikTok',
-    soundcloud: 'Soundcloud',
-    deezer: 'Deezer',
-    tidal: 'Tidal',
-    pandora: 'Pandora',
-    audiomack: 'Website',
-    beatport: 'Website',
-    bandcamp: 'Website',
-    discogs: 'Discogs',
-    genius: 'Website',
-    iHeartRadio: 'Website',
-    amazonMusic: 'Website',
-    amazon: 'Website',
-    wikipedia: 'Website',
-};
-
-async function fetchMusicFetch(spotifyId: string): Promise<any> {
-    if (!MUSICFETCH_TOKEN) throw new Error('Missing MUSICFETCH_TOKEN in .env');
-
-    const spotifyUrl = `https://open.spotify.com/artist/${spotifyId}`;
-    const services = 'spotify,amazon,youtubeMusic,youtube,audiomack,bandcamp,beatport,deezer,discogs,genius,iHeartRadio,appleMusic,instagram,pandora,soundcloud,tidal,tiktok,x,wikipedia';
-    const url = `https://api.musicfetch.io/url?url=${encodeURIComponent(spotifyUrl)}&services=${encodeURIComponent(services)}&country=US&withTracks=false`;
-
-    const res = await fetch(url, { headers: { 'x-token': MUSICFETCH_TOKEN } });
-
-    if (res.status === 429) {
-        await sleep(5000);
-        return fetchMusicFetch(spotifyId);
+    try {
+        const res = await fetch(url, {
+            headers: { 'x-token': MF_TOKEN }
+        });
+        if (res.status === 429) {
+            console.log('\n   ⏳ MusicFetch Rate limited. Sleeping 10s...');
+            await sleep(10000);
+            return fetchMusicFetch(spotifyUrl);
+        }
+        if (!res.ok) return null;
+        return await res.json();
+    } catch (error) {
+        console.error('❌ MusicFetch Network Error:', error);
+        return null;
     }
-
-    if (res.status === 401 || res.status === 403) throw new Error('Invalid or expired MusicFetch token');
-    if (!res.ok) return null;
-
-    const data: any = await res.json();
-    return data.result;
 }
 
-async function processBatch(offset: number): Promise<number> {
-    // Source: Spotify social_profiles that have already been enriched (we have their Spotify ID confirmed)
+async function processBatch(): Promise<number> {
     const { data: profiles, error } = await supabase
         .from('social_profiles')
-        .select('id, social_id, talent_id, name')
+        .select('id, social_url, talent_id, name')
         .eq('social_type', 'Spotify')
-        .eq('status', 'Done')
-        .not('social_id', 'is', null)
-        .neq('social_id', '')
-        .range(offset, offset + BATCH_SIZE - 1);
+        .is('mf_check', null)
+        .not('social_url', 'is', null)
+        .limit(BATCH_SIZE);
 
     if (error) {
-        console.error('❌ Error fetching Spotify profiles:', error.message);
+        console.error('❌ Error fetching profiles:', error.message);
         return 0;
     }
 
     if (!profiles || profiles.length === 0) return 0;
 
-    for (const profile of (profiles as any[])) {
-        process.stdout.write(`\r   🔗 MusicFetch: ${profile.name || profile.social_id}...`);
+    for (const profile of profiles) {
+        process.stdout.write(`\r   🔍 MusicFetch: ${profile.name || profile.id}...`);
+        
+        const data = await fetchMusicFetch(profile.social_url!);
+        const result = data?.result;
 
-        let mfData: any;
-        try {
-            mfData = await fetchMusicFetch(profile.social_id!);
-        } catch (err: any) {
-            console.error(`\n❌ Fatal: ${err.message}`);
-            break;
+        if (result) {
+            // 1. Update Talent Metadata
+            const talentUpdate: any = {};
+            if (result.dateOfBirth) talentUpdate.dob = result.dateOfBirth;
+            if (result.hometown) talentUpdate.hometown = result.hometown;
+            if (result.aliases && Array.isArray(result.aliases)) talentUpdate.aliases = result.aliases;
+            
+            if (Object.keys(talentUpdate).length > 0) {
+                await supabase.from('talent_profiles').update(talentUpdate).eq('id', profile.talent_id);
+            }
+
+            // 2. Update current Social Profile (Bio)
+            if (result.description) {
+                await supabase.from('social_profiles').update({
+                    social_about: result.description,
+                    updated_at: new Date().toISOString()
+                }).eq('id', profile.id);
+            }
+
+            // 3. Discovery/Linking (All other platforms)
+            const services = result.services || {};
+            for (const [sKey, sData] of Object.entries(services) as [string, any][]) {
+                const sType = mapServiceToType(sKey);
+                if (!sType || sType === 'Spotify') continue;
+
+                const url = sData.link || (sData.links && sData.links[0]?.url);
+                const sId = sData.id ? String(sData.id) : null;
+
+                if (url || sId) {
+                    const { data: existing } = await supabase
+                        .from('social_profiles')
+                        .select('id, social_id, social_url')
+                        .eq('talent_id', profile.talent_id)
+                        .eq('social_type', sType)
+                        .maybeSingle();
+
+                    if (!existing) {
+                        await supabase.from('social_profiles').insert({
+                            talent_id: profile.talent_id,
+                            social_type: sType,
+                            social_id: sId,
+                            social_url: url,
+                            name: profile.name,
+                            linking_status: 'done',
+                            created_at: new Date().toISOString()
+                        });
+                    } else {
+                        // Update missing ID or URL if discovered
+                        const updateObj: any = {};
+                        if (!existing.social_id && sId) updateObj.social_id = sId;
+                        if (!existing.social_url && url) updateObj.social_url = url;
+                        
+                        if (Object.keys(updateObj).length > 0) {
+                            await supabase.from('social_profiles').update({
+                                ...updateObj,
+                                updated_at: new Date().toISOString()
+                            }).eq('id', existing.id);
+                        }
+                    }
+                }
+            }
+
+            // 4. Mark checked
+            await supabase.from('social_profiles').update({
+                mf_check: new Date().toISOString()
+            }).eq('id', profile.id);
+
+        } else {
+            // Mark as checked to avoid re-retrying failures
+            await supabase.from('social_profiles').update({
+                mf_check: new Date().toISOString()
+            }).eq('id', profile.id);
         }
 
         await sleep(SLEEP_MS);
-
-        if (!mfData?.services) continue;
-
-        const artistName = profile.name;
-        const cleanUsername = artistName ? artistName.toLowerCase().replace(/[^a-z0-9]/g, '') : null;
-
-        // For each platform returned, check if the talent already has a social_profile for it
-        // If not, create one. If yes and it doesn't have a URL, update it.
-        const upserts: any[] = [];
-
-        for (const [mfKey, serviceData] of Object.entries(mfData.services)) {
-            const link = (serviceData as any)?.link;
-            if (!link) continue;
-
-            const socialType = MF_TYPE_MAP[mfKey];
-            if (!socialType) continue;
-
-            // Check if row already exists for this talent+type
-            const { data: existing } = await supabase
-                .from('social_profiles')
-                .select('id, social_url')
-                .eq('talent_id', profile.talent_id)
-                .eq('social_type', socialType)
-                .maybeSingle();
-
-            if (existing) {
-                // Only update URL if it's missing
-                if (!existing.social_url) {
-                    upserts.push({ id: existing.id, social_url: link, username: cleanUsername, updated_at: new Date().toISOString() });
-                }
-            } else {
-                // Create a brand new social_profile row for this platform
-                upserts.push({
-                    talent_id: profile.talent_id,
-                    social_type: socialType,
-                    name: artistName,
-                    username: cleanUsername,
-                    social_url: link,
-                    status: null, // Will be picked up by the specific enricher for this platform
-                    linking_status: 'done',
-                    created_at: new Date().toISOString(),
-                    updated_at: new Date().toISOString(),
-                });
-            }
-        }
-
-        if (upserts.length > 0) {
-            const toInsert = upserts.filter(u => !u.id);
-            const toUpdate = upserts.filter(u => u.id);
-
-            if (toInsert.length > 0) {
-                const { error: insertErr } = await supabase.from('social_profiles').insert(toInsert);
-                if (insertErr) console.error(`\n   ⚠️ Insert error: ${insertErr.message}`);
-            }
-            if (toUpdate.length > 0) {
-                for (const row of toUpdate) {
-                    await supabase.from('social_profiles').update({ social_url: row.social_url, updated_at: row.updated_at }).eq('id', row.id);
-                }
-            }
-        }
     }
 
     return profiles.length;
 }
 
-async function main() {
-    if (!MUSICFETCH_TOKEN) {
-        console.error('❌ Missing MUSICFETCH_TOKEN in .env file!');
-        process.exit(1);
-    }
-
-    console.log('\n🎵 MusicFetch Social Profile Enricher');
-    console.log('======================================');
-    console.log(`🔑 MusicFetch token: ${MUSICFETCH_TOKEN.substring(0, 8)}...`);
-
-    const { count: total } = await supabase
-        .from('social_profiles')
-        .select('id', { count: 'estimated', head: true })
-        .eq('social_type', 'Spotify')
-        .eq('status', 'Done');
-
-    console.log(`📊 Enriched Spotify profiles to process: ~${total || 0}`);
-    console.log(`⏱️  ~28 req/min (2.1s delay between requests)`);
-
-    let totalProcessed = 0;
-    let offset = 0;
-
-    while (true) {
-        const count = await processBatch(offset);
-        if (count === 0) break;
-        totalProcessed += count;
-        offset += count;
-        process.stdout.write(`\r   ✅ Processed ${totalProcessed} of ~${total} Spotify profiles...`);
-    }
-
-    console.log(`\n\n✨ Done! Processed ${totalProcessed} artists via MusicFetch.`);
+function mapServiceToType(key: string): string | null {
+    const map: Record<string, string> = {
+        appleMusic: 'Apple Music',
+        instagram: 'Instagram',
+        facebook: 'Facebook',
+        twitter: 'Twitter',
+        x: 'Twitter',
+        youtube: 'YouTube',
+        youtubeMusic: 'YouTube Music',
+        tiktok: 'TikTok',
+        soundcloud: 'Soundcloud',
+        deezer: 'Deezer',
+        tidal: 'Tidal',
+        pandora: 'Pandora',
+        audiomack: 'Audiomack',
+        beatport: 'Beatport',
+        bandcamp: 'Bandcamp',
+        discogs: 'Discogs',
+        genius: 'Genius',
+        iHeartRadio: 'iHeartRadio',
+        amazonMusic: 'Amazon Music',
+        amazon: 'Amazon',
+        wikipedia: 'Wikipedia',
+        musicBrainz: 'MusicBrainz',
+        shazam: 'Shazam'
+    };
+    return map[key] || null;
 }
 
-main().catch(err => {
-    console.error('Fatal error:', err);
-    process.exit(1);
-});
+async function main() {
+    console.log('\n🎧 MusicFetch Master Linker & Talent Enricher');
+    console.log('============================================');
+
+    let totalProcessed = 0;
+    while (true) {
+        const count = await processBatch();
+        if (count === 0) break;
+        totalProcessed += count;
+        process.stdout.write(`\r   ✅ Total Spotify profiles checked: ${totalProcessed}`);
+    }
+    console.log(`\n\n✨ Done! Enriched ${totalProcessed} artists.`);
+}
+
+main().catch(err => { console.error('Fatal error:', err); process.exit(1); });
