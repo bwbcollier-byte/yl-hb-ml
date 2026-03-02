@@ -48,7 +48,8 @@ const PLATFORM_MAP: Record<string, string> = {
 
 const RAPID_API_HOSTS = [
     'spotify81.p.rapidapi.com',
-    'spotify23.p.rapidapi.com'
+    'spotify23.p.rapidapi.com',
+    'spotify-data.p.rapidapi.com'
 ];
 
 let currentHostIndex = 0;
