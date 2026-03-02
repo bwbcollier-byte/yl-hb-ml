@@ -1,41 +1,34 @@
 #!/bin/bash
 # ============================================================
-# Social Profile Enrichment Pipeline
-# Runs all social enrichers in logical dependency order
+# Social Profile Enrichment Pipeline (Overnight Version)
+# Loops continuously to ensure progress even after timeouts
 # ============================================================
 
-echo "🚀 HB Talent Music Profiles - Social Enrichment Pipeline"
-echo "=========================================================="
+while true; do
+    echo "🚀 HB Talent Music Profiles - Social Enrichment Round Starting..."
+    echo "=========================================================="
 
-# Step 1: Spotify (foundation - enriches Spotify rows, needed by MusicFetch)
-echo ""
-echo "⠿ Step 1/4: Spotify Enricher"
-echo "---------------------------"
-npx ts-node src/social-enrich-spotify.ts
-echo "✅ Spotify Enricher Done"
+    # Step 1: Spotify (foundation - enriches Spotify rows)
+    echo "⠿ Step 1/5: Spotify Enricher"
+    npx ts-node src/social-enrich-spotify.ts
 
-# Step 2: Deezer (independent - has its own IDs)
-echo ""
-echo "⠿ Step 2/4: Deezer Enricher"
-echo "---------------------------"
-npx ts-node src/social-enrich-deezer.ts
-echo "✅ Deezer Enricher Done"
+    # Step 2: MusicFetch (Uses enriched Spotify IDs to find other links)
+    echo "⠿ Step 2/5: MusicFetch Enricher"
+    npx ts-node src/social-enrich-musicfetch.ts
 
-# Step 3: MusicBrainz (independent - has its own MBIDs, also discovers new links)
-echo ""
-echo "⠿ Step 3/4: MusicBrainz Enricher"
-echo "---------------------------------"
-npx ts-node src/social-enrich-musicbrainz.ts
-echo "✅ MusicBrainz Enricher Done"
+    # Step 3: Deezer (independent enrichment)
+    echo "⠿ Step 3/5: Deezer Enricher"
+    npx ts-node src/social-enrich-deezer.ts
 
-# Step 4: AudioDB (depends on MusicBrainz rows being Done)
-echo ""
-echo "⠿ Step 4/4: TheAudioDB Enricher"
-echo "--------------------------------"
-npx ts-node src/social-enrich-audiodb.ts
-echo "✅ AudioDB Enricher Done"
+    # Step 4: MusicBrainz (discovers new links + enrich IDs)
+    echo "⠿ Step 4/5: MusicBrainz Enricher"
+    npx ts-node src/social-enrich-musicbrainz.ts
 
-echo ""
-echo "=========================================================="
-echo "✨ All Social Enrichers Complete!"
-echo "=========================================================="
+    # Step 5: AudioDB (depends on MusicBrainz IDs)
+    echo "⠿ Step 5/5: TheAudioDB Enricher"
+    npx ts-node src/social-enrich-audiodb.ts
+
+    echo "=========================================================="
+    echo "✨ Round Complete. Sleeping for 30s before next round..."
+    sleep 30
+done
