@@ -6,20 +6,22 @@ import readline from 'readline';
 dotenv.config();
 
 /**
- * MUSICFETCH MASTER ENRICHER (V2)
+ * MUSICFETCH MASTER ENRICHER (V2.1)
  * 
  * 1. Finds Spotify profiles where mf_check is NULL
  * 2. Hits MusicFetch API with deep-field parameters
  * 3. Actions:
  *    - Creates a 'MusicFetch' social_profile if not exists (using Spotify ID/URL)
  *    - Store the 'social_about' on the NEW MusicFetch record
- *    - Discovers and creates/links all other platform records (Deezer, Apple, etc.)
+ *    - Discovers and CREATES/LINKS all other platform records (Deezer, Apple, etc.)
  *    - Updates talent_profiles (dob, hometown, aliases)
  *    - MARKS original Spotify record as mf_check = NOW()
+ * 
+ * Rate Limit: ~40 reqs/min (using 1.6s delay)
  */
 
 const BATCH_SIZE = 20;
-const SLEEP_MS = 2100;
+const SLEEP_MS = 1600; // ~37.5 requests per minute
 
 const rl = readline.createInterface({
     input: process.stdin,
@@ -40,8 +42,8 @@ async function fetchMusicFetch(spotifyUrl: string, token: string) {
             headers: { 'x-token': token }
         });
         if (res.status === 429) {
-            console.log('\n   ⏳ MusicFetch Rate limited. Sleeping 10s...');
-            await sleep(10000);
+            console.log('\n   ⏳ MusicFetch Rate limited. Sleeping 15s...');
+            await sleep(15000);
             return fetchMusicFetch(spotifyUrl, token);
         }
         if (!res.ok) return null;
@@ -91,12 +93,14 @@ async function processBatch(token: string): Promise<number> {
                     social_url: profile.social_url,
                     name: profile.name,
                     social_about: result.description,
+                    social_image: result.image?.url,
                     linking_status: 'done',
                     created_at: new Date().toISOString()
                 });
             } else {
                 await supabase.from('social_profiles').update({
                     social_about: result.description,
+                    social_image: result.image?.url,
                     updated_at: new Date().toISOString()
                 }).eq('id', existingMF.id);
             }
@@ -119,31 +123,39 @@ async function processBatch(token: string): Promise<number> {
 
                 const url = sData.link || (sData.links && sData.links[0]?.url);
                 const sId = sData.id ? String(sData.id) : null;
+                const sImg = sData.images?.[0]?.url || sData.image?.url;
+                const sAbout = sData.description;
 
                 if (url || sId) {
-                    // Optimized Check: Match by URL, ID, or Talent+Type
                     const { data: existing } = await supabase
                         .from('social_profiles')
-                        .select('id, social_id, social_url')
+                        .select('id, social_id, social_url, social_image, social_about')
                         .eq('talent_id', profile.talent_id)
                         .eq('social_type', sType)
                         .maybeSingle();
 
                     if (!existing) {
+                        // CREATE NEW RECORD
                         await supabase.from('social_profiles').insert({
                             talent_id: profile.talent_id,
                             social_type: sType,
                             social_id: sId,
                             social_url: url,
+                            social_image: sImg,
+                            social_about: sAbout,
                             name: profile.name,
                             linking_status: 'done',
-                            created_at: new Date().toISOString()
+                            created_at: new Date().toISOString(),
+                            updated_at: new Date().toISOString()
                         });
+                        console.log(`   ✨ Created ${sType}`);
                     } else {
-                        // Update missing fields
+                        // UPDATE MISSING VALUES
                         const updateObj: any = {};
                         if (!existing.social_id && sId) updateObj.social_id = sId;
                         if (!existing.social_url && url) updateObj.social_url = url;
+                        if (!existing.social_image && sImg) updateObj.social_image = sImg;
+                        if (!existing.social_about && sAbout) updateObj.social_about = sAbout;
                         
                         if (Object.keys(updateObj).length > 0) {
                             await supabase.from('social_profiles').update({
