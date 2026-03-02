@@ -44,6 +44,9 @@ const PLATFORM_MAP: Record<string, string> = {
     'WIKIPEDIA': 'Website',
     'YOUTUBE': 'YouTube',
     'SOUNDCLOUD': 'Soundcloud',
+    'DEEZER': 'Deezer',
+    'TIKTOK': 'TikTok',
+    'TIK TOK': 'TikTok',
 };
 
 const RAPID_API_HOSTS = [
@@ -320,14 +323,14 @@ async function processBatch(): Promise<number> {
                 const socialType = PLATFORM_MAP[platformName] || (platformName ? 'Website' : null);
                 
                 if (socialType && link.url) {
-                    const { data: existing } = await supabase
+                    const { data: existingSoc } = await supabase
                         .from('social_profiles')
-                        .select('id')
+                        .select('id, social_id, status')
                         .eq('talent_id', profile.talent_id)
-                        .eq('social_url', link.url)
+                        .eq('social_type', socialType)
                         .maybeSingle();
 
-                    if (!existing) {
+                    if (!existingSoc) {
                         const extractedId = extractIdFromUrl(link.url, socialType);
                         newSocials.push({
                             talent_id: profile.talent_id,
@@ -341,6 +344,16 @@ async function processBatch(): Promise<number> {
                             created_at: new Date().toISOString(),
                             updated_at: new Date().toISOString()
                         });
+                    } else if (!existingSoc.social_id || existingSoc.status !== 'Done') {
+                        // Update existing profile with discovered ID to help later enrichers
+                        const extractedId = extractIdFromUrl(link.url, socialType);
+                        if (extractedId) {
+                            await supabase.from('social_profiles').update({
+                                social_id: extractedId,
+                                social_url: link.url,
+                                updated_at: new Date().toISOString()
+                            }).eq('id', existingSoc.id);
+                        }
                     }
                 }
             }
