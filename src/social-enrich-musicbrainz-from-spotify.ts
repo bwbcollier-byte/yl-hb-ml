@@ -199,7 +199,7 @@ async function main() {
         .from('social_profiles')
         .select('id', { count: 'estimated', head: true })
         .eq('social_type', 'Spotify')
-        .is('status', null);
+        .is('last_processed', null);
 
     console.log(`📊 Spotify profiles to check against MB: ~${total || 0}`);
     console.log(`⏱️  ~1 req/sec per MusicBrainz policy`);
