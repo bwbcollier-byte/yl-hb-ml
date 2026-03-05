@@ -25,8 +25,12 @@ while true; do
     npx ts-node src/social-enrich-musicbrainz.ts
 
     # Step 5: AudioDB (depends on MusicBrainz IDs)
-    echo "⠿ Step 5/5: TheAudioDB Enricher"
+    echo "⠿ Step 5/6: TheAudioDB Enricher"
     npx ts-node src/social-enrich-audiodb.ts
+
+    # Step 6: TMDB (discovers social IDs for people)
+    echo "⠿ Step 6/6: TMDB Enricher"
+    npx ts-node src/social-enrich-tmdb.ts
 
     echo "=========================================================="
     echo "✨ Round Complete. Sleeping for 30s before next round..."

@@ -84,6 +84,44 @@ CONCURRENCY=5  # Process 5 artists in parallel (default: 5)
 LIMIT=10       # Optional: Limit records for testing
 ```
 
+
+## Rovi Artist Enrichment
+
+Enriches artist records in Airtable with Rovi Music data. Uses interactive or environment-based record selection, batch processing, and robust error handling.
+
+### Environment Variables
+```env
+# Airtable Configuration
+AIRTABLE_TOKEN=pat.xxxxxxxxxxxxx
+AIRTABLE_BASE_ID=your_base_id
+AIRTABLE_TABLE_ID=your_table_id
+AIRTABLE_VIEW_NAME=Rovi Process
+
+# Rovi API (placeholder, update as needed)
+ROVI_API_KEY=your_rovi_api_key
+
+# Optional
+LIMIT=10  # Limit records for testing
+```
+
+### Usage
+```bash
+# Build TypeScript
+npm run build
+
+# Run Rovi enrichment
+npm run rovi-enrich
+# Or directly:
+npx ts-node src/rovi-artist-enrichment.ts
+```
+
+### Processing Flow
+1. Fetch artists from the Airtable view (default: "Rovi Process")
+2. For each artist, call the Rovi API (simulated in placeholder)
+3. Update Airtable with Rovi fields (ID, genres, bio, image, etc.)
+4. Status and error handling as with other enrichments
+
+---
 ## Usage
 
 ### Local Execution

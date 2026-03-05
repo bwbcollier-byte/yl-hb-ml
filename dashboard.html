@@ -1,0 +1,654 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HypeBase | Data Enrichment Dashboard</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+    />
+    <style>
+      :root {
+        --sidebar-bg: #1e2128;
+        --main-bg: #f8f9fa;
+        --text-main: #343a40;
+        --text-muted: #6c757d;
+        --border-color: #e9ecef;
+        --accent-red: #dc3545;
+        --accent-green: #28a745;
+        --accent-blue: #0d6efd;
+        --card-shadow: 0 4px 6px rgba(0, 0, 0, 0.02);
+      }
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: "Inter", sans-serif;
+        background-color: var(--main-bg);
+        color: var(--text-main);
+        display: flex;
+        height: 100vh;
+        overflow: hidden;
+      }
+
+      /* --- Sidebar --- */
+      aside {
+        width: 260px;
+        background-color: var(--sidebar-bg);
+        color: white;
+        display: flex;
+        flex-direction: column;
+        padding: 20px 0;
+        flex-shrink: 0;
+      }
+
+      .logo {
+        padding: 0 25px 30px;
+        font-size: 20px;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .nav-section {
+        margin-bottom: 25px;
+      }
+
+      .nav-title {
+        padding: 0 25px 10px;
+        font-size: 11px;
+        text-transform: uppercase;
+        color: #5b6371;
+        letter-spacing: 1px;
+        font-weight: 600;
+      }
+
+      .nav-item {
+        padding: 12px 25px;
+        display: flex;
+        align-items: center;
+        gap: 15px;
+        color: #adb5bd;
+        text-decoration: none;
+        font-size: 14px;
+        transition: 0.2s;
+        cursor: pointer;
+      }
+
+      .nav-item:hover {
+        background-color: rgba(255, 255, 255, 0.05);
+        color: white;
+      }
+
+      .nav-item.active {
+        color: white;
+        background-color: rgba(255, 255, 255, 0.08);
+        border-left: 3px solid white;
+        padding-left: 22px;
+      }
+
+      /* --- Main Content --- */
+      main {
+        flex-grow: 1;
+        display: flex;
+        flex-direction: column;
+        overflow-y: auto;
+      }
+
+      header {
+        height: 70px;
+        background: white;
+        border-bottom: 1px solid var(--border-color);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 40px;
+      }
+
+      .header-nav {
+        display: flex;
+        gap: 30px;
+      }
+
+      .header-nav a {
+        text-decoration: none;
+        color: var(--text-muted);
+        font-size: 14px;
+        font-weight: 500;
+      }
+
+      .header-actions {
+        display: flex;
+        align-items: center;
+        gap: 20px;
+      }
+
+      .profile-img {
+        width: 35px;
+        height: 35px;
+        border-radius: 50%;
+        background: #ddd;
+      }
+
+      .content-area {
+        padding: 40px;
+        max-width: 1400px;
+        margin: 0 auto;
+        width: 100%;
+      }
+
+      .page-title {
+        margin-bottom: 30px;
+      }
+
+      .page-title h1 {
+        font-size: 24px;
+        font-weight: 700;
+        margin-bottom: 5px;
+      }
+
+      .page-title p {
+        color: var(--text-muted);
+        font-size: 14px;
+      }
+
+      /* --- Stats Row --- */
+      .stats-row {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 25px;
+        margin-bottom: 40px;
+      }
+
+      .stat-card {
+        background: white;
+        padding: 25px;
+        border-radius: 12px;
+        box-shadow: var(--card-shadow);
+        border: 1px solid #f1f3f5;
+      }
+
+      .stat-header {
+        display: flex;
+        align-items: center;
+        gap: 15px;
+        margin-bottom: 15px;
+      }
+
+      .stat-icon {
+        width: 40px;
+        height: 40px;
+        border-radius: 8px;
+        background: #000;
+        color: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .stat-value {
+        font-size: 28px;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .stat-growth {
+        font-size: 12px;
+        color: var(--text-muted);
+        font-weight: 400;
+      }
+
+      .stat-label {
+        font-size: 14px;
+        color: var(--text-muted);
+        margin-top: 10px;
+        border-top: 1px solid #f8f9fa;
+        padding-top: 12px;
+      }
+
+      /* --- Engine Control Center --- */
+      .engine-card {
+        background: white;
+        padding: 30px;
+        border-radius: 12px;
+        box-shadow: var(--card-shadow);
+        margin-bottom: 40px;
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+      }
+
+      .engine-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .run-btn {
+        background-color: #000;
+        color: white;
+        border: none;
+        padding: 12px 30px;
+        border-radius: 8px;
+        font-weight: 600;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        transition: transform 0.1s;
+      }
+
+      .run-btn:active {
+        transform: scale(0.98);
+      }
+
+      .status-badge {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--accent-red);
+      }
+
+      .status-dot {
+        width: 10px;
+        height: 10px;
+        background-color: var(--accent-red);
+        border-radius: 50%;
+      }
+
+      .progress-container {
+        width: 100%;
+      }
+
+      .progress-label {
+        display: flex;
+        justify-content: space-between;
+        font-size: 13px;
+        margin-bottom: 10px;
+        font-weight: 500;
+      }
+
+      .progress-bar {
+        height: 10px;
+        background-color: #f1f3f5;
+        border-radius: 5px;
+        overflow: hidden;
+      }
+
+      .progress-fill {
+        height: 100%;
+        background-color: #000;
+        width: 0%;
+        transition: width 0.5s cubic-bezier(0.1, 0, 0, 1);
+      }
+
+      /* --- Data Table --- */
+      .table-card {
+        background: white;
+        border-radius: 12px;
+        box-shadow: var(--card-shadow);
+        overflow: hidden;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 14px;
+      }
+
+      th {
+        background-color: #f8f9fa;
+        text-align: left;
+        padding: 15px 25px;
+        color: var(--text-muted);
+        font-weight: 500;
+        border-bottom: 1px solid var(--border-color);
+      }
+
+      td {
+        padding: 15px 25px;
+        border-bottom: 1px solid #f8f9fa;
+      }
+
+      .artist-info {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .artist-img {
+        width: 35px;
+        height: 35px;
+        border-radius: 6px;
+        background: #eee;
+      }
+
+      .artist-name {
+        font-weight: 600;
+      }
+
+      .artist-meta {
+        font-size: 12px;
+        color: var(--text-muted);
+      }
+
+      .badge {
+        padding: 4px 10px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+      }
+
+      .badge-tmdb {
+        background: #e7f5ff;
+        color: #007bff;
+      }
+      .badge-spotify {
+        background: #ebfbee;
+        color: #2b8a3e;
+      }
+
+      .log-entry {
+        font-family: monospace;
+        font-size: 12px;
+        color: #495057;
+      }
+
+      @keyframes pulse {
+        0% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.4;
+        }
+        100% {
+          opacity: 1;
+        }
+      }
+
+      .active .status-dot {
+        background-color: var(--accent-green);
+        animation: pulse 1.5s infinite;
+      }
+      .active .status-badge {
+        color: var(--accent-green);
+      }
+    </style>
+  </head>
+  <body>
+    <aside>
+      <div class="logo"><i class="fas fa-layer-group"></i> HypeBase</div>
+
+      <div class="nav-section">
+        <a href="#" class="nav-item"
+          ><i class="fas fa-chart-pie"></i> Dashboard</a
+        >
+        <a href="#" class="nav-item"
+          ><i class="fas fa-bell"></i> Notifications</a
+        >
+        <a href="#" class="nav-item"><i class="fas fa-file-alt"></i> Notes</a>
+        <a href="#" class="nav-item"><i class="fas fa-tasks"></i> Tasks</a>
+        <a href="#" class="nav-item active"
+          ><i class="fas fa-code-branch"></i> Workflows</a
+        >
+      </div>
+
+      <div class="nav-section">
+        <div class="nav-title">Database</div>
+        <a href="#" class="nav-item"
+          ><i class="fas fa-users"></i> Contacts CRM</a
+        >
+        <a href="#" class="nav-item"
+          ><i class="fas fa-star"></i> Talent Profiles</a
+        >
+        <a href="#" class="nav-item"
+          ><i class="fas fa-share-alt"></i> Social Profiles</a
+        >
+        <a href="#" class="nav-item"
+          ><i class="fas fa-newspaper"></i> News & Media</a
+        >
+      </div>
+    </aside>
+
+    <main>
+      <header>
+        <div class="header-nav">
+          <a href="#">Dashboard</a>
+          <a href="#">My team</a>
+          <a href="#">Projects</a>
+          <a href="#">Calendar</a>
+        </div>
+        <div class="header-actions">
+          <i class="fas fa-search" style="color: #adb5bd"></i>
+          <i class="fas fa-bell" style="color: #adb5bd"></i>
+          <div class="profile-img"></div>
+        </div>
+      </header>
+
+      <div class="content-area">
+        <div class="page-title">
+          <h1>TMDb Super-Enricher Engine</h1>
+          <p>
+            Monitor your filmography and social data enrichment pipeline in
+            real-time.
+          </p>
+        </div>
+
+        <!-- Stats Row -->
+        <div class="stats-row">
+          <div class="stat-card">
+            <div class="stat-header">
+              <div class="stat-icon"><i class="fas fa-hourglass-half"></i></div>
+              <div class="stat-value">
+                2,840 <span class="stat-growth">+12%</span>
+              </div>
+            </div>
+            <div class="stat-label">Pending TMDb Profiles</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-header">
+              <div class="stat-icon"><i class="fas fa-check-circle"></i></div>
+              <div class="stat-value">
+                1,205
+                <span class="stat-growth" style="color: var(--accent-green)"
+                  >+5.2%</span
+                >
+              </div>
+            </div>
+            <div class="stat-label">Enriched Last 24h</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-header">
+              <div class="stat-icon"><i class="fas fa-bolt"></i></div>
+              <div class="stat-value">
+                94.8% <span class="stat-growth">Match Rate</span>
+              </div>
+            </div>
+            <div class="stat-label">Successful API Hits</div>
+          </div>
+        </div>
+
+        <!-- Engine Control -->
+        <div class="engine-card" id="engineCard">
+          <div class="engine-header">
+            <div>
+              <h2 style="font-size: 18px; font-weight: 700; margin-bottom: 5px">
+                Enrichment Pipeline Control
+              </h2>
+              <p style="font-size: 13px; color: var(--text-muted)">
+                Current Batch Size: 25 entities | Rate Limit: 40/sec
+              </p>
+            </div>
+            <div class="status-badge">
+              <div class="status-dot"></div>
+              <span id="statusText">INACTIVE</span>
+            </div>
+            <button class="run-btn" id="runBtn">
+              <i class="fas fa-play"></i> RUN ENGINE
+            </button>
+          </div>
+
+          <div class="progress-container">
+            <div class="progress-label">
+              <span>Current Batch Progress</span>
+              <span id="progressPercent">0%</span>
+            </div>
+            <div class="progress-bar">
+              <div class="progress-fill" id="progressFill"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Activity Table -->
+        <div class="table-card">
+          <table>
+            <thead>
+              <tr>
+                <th>Entity Name</th>
+                <th>Enrichment Status</th>
+                <th>Action Taken</th>
+                <th>Timestamp</th>
+              </tr>
+            </thead>
+            <tbody id="logBody">
+              <!-- Simulated Log Rows -->
+              <tr>
+                <td>
+                  <div class="artist-info">
+                    <div class="artist-img"></div>
+                    <div>
+                      <div class="artist-name">Michelle Pfeiffer</div>
+                      <div class="artist-meta">Actress</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="badge badge-tmdb">ENRICHED</span></td>
+                <td class="log-entry">Combined Credits (82) + Gallery (12)</td>
+                <td class="artist-meta">Just now</td>
+              </tr>
+              <tr>
+                <td>
+                  <div class="artist-info">
+                    <div class="artist-img"></div>
+                    <div>
+                      <div class="artist-name">Spike Lee</div>
+                      <div class="artist-meta">Director</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="badge badge-tmdb">ENRICHED</span></td>
+                <td class="log-entry">Bio + Popularity Rank (2.01)</td>
+                <td class="artist-meta">2 mins ago</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+
+    <script>
+      const runBtn = document.getElementById("runBtn");
+      const engineCard = document.getElementById("engineCard");
+      const statusText = document.getElementById("statusText");
+      const progressFill = document.getElementById("progressFill");
+      const progressPercent = document.getElementById("progressPercent");
+      const logBody = document.getElementById("logBody");
+
+      let isRunning = false;
+      const mockEntities = [
+        "Patrick Muldoon",
+        "Bhumika Chawla",
+        "Joseph Quinn",
+        "Kylie Minogue",
+        "Dua Lipa",
+        "Jean Reno",
+        "Hrithik Roshan",
+      ];
+
+      runBtn.addEventListener("click", () => {
+        if (isRunning) {
+          // STOP Logic
+          isRunning = false;
+          engineCard.classList.remove("active");
+          statusText.innerText = "INACTIVE";
+          runBtn.innerHTML = '<i class="fas fa-play"></i> RUN ENGINE';
+          progressFill.style.width = "0%";
+          progressPercent.innerText = "0%";
+        } else {
+          // START Logic
+          isRunning = true;
+          engineCard.classList.add("active");
+          statusText.innerText = "ACTIVE & PROCESSING";
+          runBtn.innerHTML = '<i class="fas fa-stop"></i> STOP ENGINE';
+          runBtn.style.backgroundColor = "#dc3545";
+          simulateProgress();
+        }
+      });
+
+      function simulateProgress() {
+        let progress = 0;
+        const interval = setInterval(() => {
+          if (!isRunning) {
+            clearInterval(interval);
+            return;
+          }
+
+          progress += Math.random() * 15;
+          if (progress >= 100) {
+            progress = 100;
+            addLogRow();
+            progress = 0; // Simulate next batch
+            progressFill.style.transition = "none";
+            progressFill.style.width = "0%";
+            setTimeout(
+              () =>
+                (progressFill.style.transition =
+                  "width 0.5s cubic-bezier(0.1, 0, 0, 1)"),
+              50,
+            );
+          }
+
+          progressFill.style.width = progress + "%";
+          progressPercent.innerText = Math.round(progress) + "%";
+        }, 800);
+      }
+
+      function addLogRow() {
+        const name =
+          mockEntities[Math.floor(Math.random() * mockEntities.length)];
+        const row = document.createElement("tr");
+        row.innerHTML = `
+                <td>
+                    <div class="artist-info">
+                        <div class="artist-img"></div>
+                        <div>
+                            <div class="artist-name">${name}</div>
+                            <div class="artist-meta">Artist / Talent</div>
+                        </div>
+                    </div>
+                </td>
+                <td><span class="badge badge-tmdb">ENRICHED</span></td>
+                <td class="log-entry">Filmography Updated + 10 Images Added</td>
+                <td class="artist-meta">Just now</td>
+            `;
+        logBody.prepend(row);
+        if (logBody.children.length > 8) logBody.lastElementChild.remove();
+      }
+    </script>
+  </body>
+</html>

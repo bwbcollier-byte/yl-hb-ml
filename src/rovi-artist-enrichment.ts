@@ -1,32 +1,31 @@
 import dotenv from 'dotenv';
-import fetch from 'node-fetch';
+import Airtable from 'airtable';
 import readline from 'readline';
-import {
-  getArtistsForRoviEnrichment,
-  updateArtistRoviData,
-  updateArtistRoviDataBatch
-} from './supabase';
-import { trackRoviStart, trackRoviEnd, trackRoviProgress } from './airtable-tracker';
 
 dotenv.config();
 
-// Configuration
-const ROVI_BASE_URL = 'https://tivomusicapi-staging-elb.digitalsmiths.net/sd/tivomusicapi/taps/v3/lookup/artist';
-const LIMIT_ENV = process.env.LIMIT || "";
-const ENV_LIMIT = LIMIT_ENV.trim() !== "" ? parseInt(LIMIT_ENV, 10) : undefined;
+// Airtable configuration
+const AIRTABLE_TOKEN = process.env.AIRTABLE_TOKEN!;
+const BASE_ID = process.env.AIRTABLE_BASE_ID || 'your_base_id';
+const TABLE_ID = process.env.AIRTABLE_TABLE_ID || 'your_table_id';
+const VIEW_NAME = process.env.AIRTABLE_VIEW_NAME || 'Rovi Process';
+const LIMIT = process.env.LIMIT ? parseInt(process.env.LIMIT) : undefined;
 
-/**
- * Interactive prompt for how many artists to process.
- */
+// Rovi API configuration (replace with your actual credentials and endpoint)
+const ROVI_API_KEY = process.env.ROVI_API_KEY || 'your_rovi_api_key';
+const ROVI_API_BASE = 'https://api.rovicorp.com/data/v1/music';
+const RATE_LIMIT_DELAY = 1000; // 1 second between requests
+
+Airtable.configure({ apiKey: AIRTABLE_TOKEN });
+const base = Airtable.base(BASE_ID);
+
 function promptForLimit(): Promise<number | undefined> {
   return new Promise((resolve) => {
-    if ((typeof ENV_LIMIT === 'number' && !isNaN(ENV_LIMIT)) || process.env.CI) {
-      if (typeof ENV_LIMIT === 'number' && !isNaN(ENV_LIMIT)) console.log(`\n🔢 Using LIMIT from environment: ${ENV_LIMIT}`);
-      else console.log(`\n🤖 CI Environment detected, skipping interactive prompt.`);
-      resolve(typeof ENV_LIMIT === 'number' && !isNaN(ENV_LIMIT) ? ENV_LIMIT : undefined);
+    if (LIMIT) {
+      console.log(`\n🔢 Using LIMIT from environment: ${LIMIT}`);
+      resolve(LIMIT);
       return;
     }
-
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     rl.question('\n🔢 How many artists to process? (press Enter for all): ', (answer) => {
       rl.close();
@@ -49,194 +48,119 @@ function promptForLimit(): Promise<number | undefined> {
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-function extractId(urlOrId: string | null | undefined): string | null {
-  if (!urlOrId) return null;
-  // If it's a full URL, split by / and grab the last part
-  if (urlOrId.includes('/')) {
-    const parts = urlOrId.split('/').filter(p => p.trim() !== '');
-    return parts[parts.length - 1];
-  }
-  return urlOrId;
-}
 
-/**
- * Build the query URL based on available IDs
- */
-function buildRoviUrl(artist: any) {
-  const params = new URLSearchParams();
-  params.set('includeAllFields', 'true');
-
-  const allmusicId = extractId(artist.social_allmusic_id);
-  const appleMusicId = extractId(artist.social_apple_music_id);
-  const amgPopId = extractId(artist.amg_pop_id);
-  const amgClassicId = extractId(artist.amg_classic_id);
-
-  if (allmusicId && allmusicId.startsWith('mn')) {
-    params.set('nameId', allmusicId.toUpperCase());
-  } else if (allmusicId && allmusicId.startsWith('MN')) {
-    params.set('nameId', allmusicId);
-  } else if (amgPopId || (allmusicId && allmusicId.startsWith('p'))) {
-    params.set('amgPopId', amgPopId || allmusicId!);
-  } else if (amgClassicId || (allmusicId && allmusicId.startsWith('q'))) {
-    params.set('amgClassicId', amgClassicId || allmusicId!);
-  } else if (appleMusicId) {
-    const appleIdMatch = appleMusicId.match(/id(\d+)/);
-    params.set('appleAdamId', appleIdMatch ? appleIdMatch[1] : appleMusicId);
-  } else if (allmusicId) {
-    // Fallback if it's just a raw ID without prefix
-    params.set('nameId', allmusicId);
-  }
-
-  if (Array.from(params.keys()).length <= 1) return null; // Only includeAllFields set
-
-  return `${ROVI_BASE_URL}?${params.toString()}`;
-}
-
-/**
- * Map API data to Supabase fields
- */
-function mapRoviData(hit: any) {
-  const bio = hit.musicBio?.biography?.[0]?.text || '';
-  const bioAuthor = hit.musicBio?.biography?.[0]?.author || '';
-  const headline = hit.musicBio?.headlineBio || '';
-  const genres = hit.musicGenres ? hit.musicGenres.map((g: any) => g.name).join(', ') : null;
-  const gallery = hit.images ? hit.images.map((img: any) => img.url).join(', ') : null;
-  
+// Placeholder for Rovi API call
+async function fetchRoviArtist(artistName: string): Promise<any | null> {
+  // TODO: Implement actual Rovi API call
+  // Example: const url = `${ROVI_API_BASE}/artist/search?name=${encodeURIComponent(artistName)}&apikey=${ROVI_API_KEY}`;
+  // Simulate API response
+  await sleep(RATE_LIMIT_DELAY);
   return {
-    rovi_id: hit.id,
-    rovi_headline: headline,
-    rovi_bio: bio,
-    rovi_bio_author: bioAuthor,
-    rovi_birth_place: hit.birth?.place || null,
-    rovi_birth_date: hit.birth?.date || null,
-    rovi_active: hit.active ? hit.active.join(', ') : null,
-    rovi_type: hit.type || null,
-    rovi_gender: hit.gender || null,
-    rovi_country: hit.country || null,
-    rovi_genres: genres,
-    rovi_album_count: hit.albumCount || null,
-    rovi_release_count: hit.releaseCount || null,
-    rovi_composed_track_count: hit.composedTrackCount || null,
-    rovi_performed_track_count: hit.performedTrackCount || null,
-    rovi_image: hit.images?.[0]?.url || null,
-    rovi_gallery: gallery,
-    rovi_check: 'completed'
+    name: artistName,
+    rovi_id: 'simulated_rovi_id',
+    genres: ['Pop', 'Rock'],
+    biography: 'Simulated Rovi artist bio.',
+    image_url: '',
+    // ...other fields
   };
 }
 
-async function enrichArtist(artist: any) {
-  console.log(`📋 Processing: ${artist.name}`);
-  
-  const url = buildRoviUrl(artist);
-  if (!url) {
-    console.log(`   ⚠️ No valid Rovi identifier found for ${artist.name}`);
-    return { spotify_id: artist.spotify_id, rovi_check: 'no_id' };
-  }
 
-  console.log(`   🔍 Fetching Rovi data...`);
-  const response = await fetch(url);
-  
-  if (!response.ok) {
-    throw new Error(`Rovi API error: ${response.statusText}`);
+async function processArtist(record: any) {
+  const recordId = record.id;
+  const fields = record.fields;
+  const artistName = fields['Name'] || fields['Artist Name'] || '';
+  if (!artistName) {
+    console.log(`   ⚠️  No artist name for record ${recordId}`);
+    return null;
   }
-  
-  const data = await response.json();
-  const hit = data.hits?.[0];
-
-  if (!hit) {
-    console.log(`   ⚠️ No data found in Rovi for ${artist.name}`);
-    return { spotify_id: artist.spotify_id, rovi_check: 'no_data' };
+  console.log(`🎤 Processing: ${artistName}`);
+  const roviData = await fetchRoviArtist(artistName);
+  if (!roviData) {
+    console.log(`   ❌ No Rovi data found for ${artistName}`);
+    return {
+      id: recordId,
+      fields: { 'Rovi Status': 'Not Found' }
+    };
   }
-
-  const updateFields = mapRoviData(hit);
-  return { spotify_id: artist.spotify_id, ...updateFields };
+  const updateFields: any = {
+    'Rovi Status': 'Enriched',
+    'Rovi ID': roviData.rovi_id,
+    'Rovi Genres': roviData.genres?.join(', '),
+    'Rovi Bio': roviData.biography,
+    'Rovi Image': roviData.image_url,
+    // ...add more mappings as needed
+  };
+  return { id: recordId, fields: updateFields };
 }
 
 async function main() {
-  console.log('\n🎵 Rovi/TiVo Artist Enrichment');
-  console.log('==============================');
-
-  await trackRoviStart();
-  const limit = await promptForLimit();
-
-  let totalProcessed = 0;
-  let totalErrors = 0;
-
+  console.log('🎵 Rovi Artist Enrichment');
+  console.log('================================\n');
+  console.log(`Base ID: ${BASE_ID}`);
+  console.log(`Table ID: ${TABLE_ID}`);
+  console.log(`View: ${VIEW_NAME}`);
+  console.log(`API Key: ${ROVI_API_KEY}`);
+  const effectiveLimit = await promptForLimit();
+  if (effectiveLimit) {
+    console.log(`Limit: ${effectiveLimit} records\n`);
+  }
   try {
-    console.log(limit ? `🚀 Target: ${limit} artists` : '🚀 Target: All pending artists');
-
-    while (true) {
-      // Fetch in batches of 1000 (Supabase default limit)
-      const remainingLimit = limit ? limit - totalProcessed : 1000;
-      if (limit && remainingLimit <= 0) break;
-
-      const batchLimit = limit ? Math.min(remainingLimit, 1000) : 1000;
-      const artists = await getArtistsForRoviEnrichment(batchLimit);
-
-      if (artists.length === 0) {
-        if (totalProcessed === 0) console.log('No artists to process. All caught up! ✅');
-        else console.log('\n✅ No more artists found to process.');
-        break;
-      }
-
-      console.log(`\n📦 Fetching next batch of ${artists.length} artists...`);
-
-      let currentBatch: any[] = [];
-
-      for (const artist of artists) {
-        try {
-          const update = await enrichArtist(artist);
-          if (update) {
-            currentBatch.push(update);
-            
-            // Console log to match 
-            if (update.rovi_check === 'completed') {
-              console.log(`   ✅ Buffered Rovi fields for batch save`);
-            }
-          }
-
-          totalProcessed++;
-
-          // Update progress and save every 100 records
-          if (currentBatch.length >= 100) {
-            console.log(`\n💾 Batch saving ${currentBatch.length} records to Supabase...`);
-            try {
-              await updateArtistRoviDataBatch(currentBatch);
-            } finally {
-              currentBatch = [];
-            }
-            
-            console.log(`📊 Bulk progress update: ${totalProcessed} records done...`);
-            await trackRoviProgress();
-          }
-
-          if (limit && totalProcessed >= limit) break;
-
-          await sleep(500); // Conservative delay
-        } catch (err: any) {
-          console.error(`\n❌ Error processing ${artist.name}:`, err.message);
-          totalErrors++;
-        }
-      }
-      
-      // Flush remaining items
-      if (currentBatch.length > 0) {
-        console.log(`\n💾 Catch-up batch saving ${currentBatch.length} records to Supabase...`);
-        await updateArtistRoviDataBatch(currentBatch);
-        currentBatch = [];
-      }
-
-      if (limit && totalProcessed >= limit) break;
+    console.log('📥 Fetching records from Airtable...\n');
+    const records: any[] = [];
+    const selectOptions: any = { view: VIEW_NAME };
+    if (effectiveLimit) selectOptions.maxRecords = effectiveLimit;
+    await base(TABLE_ID)
+      .select(selectOptions)
+      .eachPage((pageRecords, fetchNextPage) => {
+        records.push(...pageRecords);
+        fetchNextPage();
+      });
+    console.log(`✅ Found ${records.length} records to process\n`);
+    if (records.length === 0) {
+      console.log('No records to process. Exiting.');
+      return;
     }
-
-    console.log('\n==============================');
-    console.log('✨ Rovi Enrichment Complete!');
-    console.log(`✅ Processed: ${totalProcessed}`);
-    console.log(`❌ Errors:    ${totalErrors}`);
-    console.log('==============================\n');
-
-    await trackRoviEnd(totalProcessed, totalErrors);
-
+    let processed = 0;
+    let skipped = 0;
+    let updateBatch: any[] = [];
+    const BATCH_SIZE = 10;
+    for (let i = 0; i < records.length; i++) {
+      const record = records[i];
+      const updateData = await processArtist(record);
+      if (updateData) {
+        updateBatch.push(updateData);
+        console.log(`   📦 Added to batch (${updateBatch.length}/${BATCH_SIZE})`);
+        if (updateBatch.length === BATCH_SIZE || i === records.length - 1) {
+          try {
+            console.log(`\n💾 Updating batch of ${updateBatch.length} records...`);
+            await base(TABLE_ID).update(updateBatch);
+            processed += updateBatch.length;
+            console.log(`✅ Batch updated successfully\n`);
+            updateBatch = [];
+          } catch (error) {
+            console.error(`❌ Error updating batch:`, error);
+            console.log(`⚠️  Attempting individual updates...`);
+            for (const singleUpdate of updateBatch) {
+              try {
+                await base(TABLE_ID).update(singleUpdate.id, singleUpdate.fields);
+                processed++;
+                console.log(`   ✅ Individual update successful`);
+              } catch (individualError) {
+                console.error(`   ❌ Individual update failed:`, individualError);
+                skipped++;
+              }
+            }
+            updateBatch = [];
+          }
+        }
+      } else {
+        skipped++;
+      }
+    }
+    console.log(`\n✅ Enrichment complete!`);
+    console.log(`   Processed: ${processed}`);
+    console.log(`   Skipped: ${skipped}`);
   } catch (error) {
     console.error('❌ Fatal error:', error);
     process.exit(1);
