@@ -6,11 +6,6 @@ dotenv.config();
 
 /**
  * SOCIAL LINK ENRICHMENT (MusicLinks API)
- * 
- * 1. Fetches 'Spotify' profiles from social_profiles.
- * 2. Uses MusicLinks API to find other social platforms.
- * 3. Creates/Updates missing social profiles.
- * 4. Logs the process in workflow_logs for talent and social profiles.
  */
 
 const RAPID_API_KEY = process.env.RAPID_API_KEY || '8f8ab324eamsh88b8de70b402e0cp1d7d0ajsn13c934eadbd9';
@@ -40,18 +35,14 @@ function extractIdFromUrl(url: string, type: string): string | null {
     try {
         const u = new URL(url);
         const pathParts = u.pathname.split('/').filter(p => p.length > 0);
-        
         if (type === 'Spotify' || type === 'Apple Music' || type === 'Tidal' || type === 'Deezer' || type === 'Napster') {
-            // Usually /artist/[id] or /[country]/artist/[name]/[id]
             return pathParts[pathParts.length - 1] || null;
         }
-        
         if (type === 'YouTube') {
             if (['channel', 'user', 'c', 'artist'].includes(pathParts[0])) return pathParts[1] || null;
             if (pathParts[0]?.startsWith('@')) return pathParts[0];
             return pathParts[0] || null;
         }
-
         return pathParts[pathParts.length - 1] || null;
     } catch {
         const parts = url.split('/').filter(p => p.length > 0);
@@ -122,7 +113,11 @@ async function processBatch(): Promise<number> {
         
         const data = await fetchMusicLinks(profile.social_url!);
         if (!data || !data.links) {
-            await supabase.from('social_profiles').update({ status: 'Error' }).eq('id', profile.id);
+            console.log(`   ⚠️ Skipping ${profile.name} due to persistent API error/no data.`);
+            await supabase.from('social_profiles').update({ 
+                status: 'Error',
+                updated_at: new Date().toISOString()
+            }).eq('id', profile.id);
             continue;
         }
 
@@ -130,7 +125,6 @@ async function processBatch(): Promise<number> {
         const links = data.links;
         const discoveredPlatforms = Object.keys(links);
         
-        // Fetch existing socials for this talent to avoid duplicates
         const { data: existingSocials } = await supabase
             .from('social_profiles')
             .select('social_type, social_url')
@@ -141,7 +135,7 @@ async function processBatch(): Promise<number> {
         const newProfiles: any[] = [];
         for (const [apiType, url] of Object.entries(links)) {
             const dbType = PLATFORM_MAP[apiType];
-            if (!dbType || dbType === 'Spotify') continue; // Skip unknown or Spotify itself
+            if (!dbType || dbType === 'Spotify') continue;
             
             if (!existingMap.has(`${dbType}:${url}`)) {
                 newProfiles.push({
@@ -157,14 +151,12 @@ async function processBatch(): Promise<number> {
             }
         }
 
-        // 1. Create new social profiles
         if (newProfiles.length > 0) {
             const { error: insertError } = await supabase.from('social_profiles').insert(newProfiles);
             if (insertError) console.error(`   ❌ Failed to insert new socials:`, insertError.message);
             else console.log(`   ✅ Created ${newProfiles.length} new social profiles.`);
         }
 
-        // 2. Update Talent Profile Logs
         const { data: talent } = await supabase.from('talent_profiles').select('workflow_logs').eq('id', talentId).single();
         const updatedTalentLogs = updateWorkflowLogs(talent?.workflow_logs, {
             action: 'social_enrichment_musiclinks',
@@ -174,10 +166,8 @@ async function processBatch(): Promise<number> {
         });
         await supabase.from('talent_profiles').update({ workflow_logs: updatedTalentLogs }).eq('id', talentId);
 
-        // 3. Update Spotify Profile Status and Logs
         const updatedSpotifyLogs = updateWorkflowLogs(profile.workflow_logs, {
             action: 'enriched_by_musiclinks',
-            timestamp: new Date().toISOString(),
             status: 'completed'
         });
         await supabase.from('social_profiles').update({
