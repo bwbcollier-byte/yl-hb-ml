@@ -61,6 +61,7 @@ async function fetchMusicLinks(spotifyUrl: string, retries = 1): Promise<any> {
     };
 
     try {
+        console.log(`   🌐 API Request: ${url}`);
         const res = await fetch(url, options);
         if (res.status === 429) {
             console.log(`\n   ⏳ Rate limited. Sleeping 5s then retrying...`);
