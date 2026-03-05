@@ -1,4 +1,4 @@
-name: MB from Spotify Enrichment
+name: MusicBrainz Social & Profile Enrichment
 
 on:
   schedule:

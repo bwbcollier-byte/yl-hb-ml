@@ -75,7 +75,7 @@ async function auditPlatform(platform: typeof PLATFORMS[0]) {
     } else if (missing && missing.length > 0) {
         console.log(`   ⚠️ Found ${missing.length} missing ${platform.type} profiles. Healing...`);
         
-        const newSocials = missing.map(m => ({
+        const newSocials = missing.map((m: any) => ({
             talent_id: m.id,
             social_type: platform.type,
             social_id: platform.type === 'Spotify' || platform.type === 'IMDb' ? m[platform.masterId] : null,
