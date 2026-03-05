@@ -50,9 +50,11 @@ async function processProfile(profile: any) {
     }
 
     const now = new Date().toISOString();
+    const currentLogs = Array.isArray(profile.workflow_logs) ? profile.workflow_logs : [];
 
     if (!spotifyUrl) {
-        await supabase.from('social_profiles').update({ last_processed: now }).eq('id', profile.id);
+        const newLog = { workflow: "MusicBrainz_Spotify_Linker", date: now, result: "Failed - No valid Spotify URL or ID", status: "error" };
+        await supabase.from('social_profiles').update({ last_processed: now, workflow_logs: [...currentLogs, newLog] }).eq('id', profile.id);
         return false;
     }
 
@@ -61,9 +63,9 @@ async function processProfile(profile: any) {
     const mbData = await fetchMBIDFromSpotifyUrl(spotifyUrl);
 
     if (!mbData) {
-        // Mark as processed (so we don't repeat checking) but Not Found
+        const newLog = { workflow: "MusicBrainz_Spotify_Linker", date: now, result: "Not Found - No artist profile matches.", status: "skipped_not_found" };
         await supabase.from('social_profiles')
-            .update({ last_processed: now })
+            .update({ last_processed: now, workflow_logs: [...currentLogs, newLog] })
             .eq('id', profile.id);
         console.log('❌ Not Found');
         return false;
@@ -72,25 +74,31 @@ async function processProfile(profile: any) {
     console.log(`✅ Found MBID: ${mbData.mbid}`);
 
     // We found an MBID!
-    // 1. Mark this Spotify profile as checked for MB
+    const successLog = { workflow: "MusicBrainz_Spotify_Linker", date: now, result: `Success - Found MBID ${mbData.mbid}`, status: "success" };
+
+    // 1. Mark this Spotify profile as checked for MB and update logs
     await supabase.from('social_profiles')
         .update({ 
             last_processed: now,
-            updated_at: now
+            updated_at: now,
+            workflow_logs: [...currentLogs, successLog]
         })
         .eq('id', profile.id);
 
     // 2. Update talent_profiles with this MBID if it doesn't already have one
     const { data: talentData } = await supabase
         .from('talent_profiles')
-        .select('musicbrainz_id')
+        .select('musicbrainz_id, workflow_logs')
         .eq('id', profile.talent_id)
         .maybeSingle();
 
-    if (talentData && !talentData.musicbrainz_id) {
-        await supabase.from('talent_profiles')
-            .update({ musicbrainz_id: mbData.mbid, updated_at: now })
-            .eq('id', profile.talent_id);
+    if (talentData) {
+        const talentLogs = Array.isArray(talentData.workflow_logs) ? talentData.workflow_logs : [];
+        const updates: any = { updated_at: now, workflow_logs: [...talentLogs, successLog] };
+        if (!talentData.musicbrainz_id) {
+            updates.musicbrainz_id = mbData.mbid;
+        }
+        await supabase.from('talent_profiles').update(updates).eq('id', profile.talent_id);
     }
 
     // 3. Create a new MusicBrainz social_profile if it doesn't exist
@@ -124,7 +132,7 @@ async function processProfile(profile: any) {
 async function processBatch(): Promise<number> {
     const { data: profiles, error } = await supabase
         .from('social_profiles')
-        .select('id, social_id, social_url, talent_id, name')
+        .select('id, social_id, social_url, talent_id, name, workflow_logs')
         .eq('social_type', 'Spotify')
         .is('last_processed', null)
         .limit(BATCH_SIZE);
