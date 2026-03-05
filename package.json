@@ -9,6 +9,7 @@
     "adb": "ts-node src/audiodb-artist-enrichment.ts",
     "rovi": "ts-node src/rovi-artist-enrichment.ts",
     "musicfetch": "ts-node src/musicfetch-artist-enrichment.ts",
+    "enrich-spotify": "ts-node src/social-enrich-spotify.ts",
     "build": "tsc",
     "dev": "ts-node src/index.ts"
   },
