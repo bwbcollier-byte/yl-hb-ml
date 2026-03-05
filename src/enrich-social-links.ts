@@ -115,10 +115,26 @@ async function processBatch(): Promise<number> {
         const data = await fetchMusicLinks(profile.social_url!);
         if (!data || !data.links) {
             console.log(`   ⚠️ Skipping ${profile.name} due to persistent API error/no data.`);
+            
+            const errorEntry = {
+                action: 'social_enrichment_musiclinks_failed',
+                error: 'API 500 or No Data',
+                spotify_source: profile.social_url
+            };
+
+            // Update Talent Logs
+            const { data: talent } = await supabase.from('talent_profiles').select('workflow_logs').eq('id', profile.id).single();
+            const updatedTalentLogs = updateWorkflowLogs(talent?.workflow_logs, errorEntry);
+            await supabase.from('talent_profiles').update({ workflow_logs: updatedTalentLogs }).eq('id', profile.id);
+
+            // Update Social Logs and Status
+            const updatedSpotifyLogs = updateWorkflowLogs(profile.workflow_logs, errorEntry);
             await supabase.from('social_profiles').update({ 
                 status: 'Error',
+                workflow_logs: updatedSpotifyLogs,
                 updated_at: new Date().toISOString()
             }).eq('id', profile.id);
+            
             continue;
         }
 
