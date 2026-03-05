@@ -49,8 +49,10 @@ async function processProfile(profile: any) {
         spotifyUrl = `https://open.spotify.com/artist/${profile.social_id}`;
     }
 
+    const now = new Date().toISOString();
+
     if (!spotifyUrl) {
-        await supabase.from('social_profiles').update({ status: 'Error_NoUrl' }).eq('id', profile.id);
+        await supabase.from('social_profiles').update({ last_processed: now }).eq('id', profile.id);
         return false;
     }
 
@@ -59,9 +61,9 @@ async function processProfile(profile: any) {
     const mbData = await fetchMBIDFromSpotifyUrl(spotifyUrl);
 
     if (!mbData) {
-        // Mark as Not Found in MB or Error
+        // Mark as processed (so we don't repeat checking) but Not Found
         await supabase.from('social_profiles')
-            .update({ status: 'MB_NotFound', last_checked: new Date().toISOString() })
+            .update({ last_processed: now })
             .eq('id', profile.id);
         console.log('❌ Not Found');
         return false;
@@ -70,12 +72,11 @@ async function processProfile(profile: any) {
     console.log(`✅ Found MBID: ${mbData.mbid}`);
 
     // We found an MBID!
-    // 1. Update the original Spotify social_profile to say 'Done'
+    // 1. Mark this Spotify profile as checked for MB
     await supabase.from('social_profiles')
         .update({ 
-            status: 'Done',
-            last_checked: new Date().toISOString(),
-            updated_at: new Date().toISOString()
+            last_processed: now,
+            updated_at: now
         })
         .eq('id', profile.id);
 
@@ -88,7 +89,7 @@ async function processProfile(profile: any) {
 
     if (talentData && !talentData.musicbrainz_id) {
         await supabase.from('talent_profiles')
-            .update({ musicbrainz_id: mbData.mbid, updated_at: new Date().toISOString() })
+            .update({ musicbrainz_id: mbData.mbid, updated_at: now })
             .eq('id', profile.talent_id);
     }
 
@@ -111,8 +112,8 @@ async function processProfile(profile: any) {
             social_url: `https://musicbrainz.org/artist/${mbData.mbid}`,
             status: null, // Let the other MB enricher pick this up
             linking_status: 'done',
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
+            created_at: now,
+            updated_at: now
         });
         console.log(`      + Added MusicBrainz profile to social_profiles`);
     }
@@ -125,7 +126,7 @@ async function processBatch(): Promise<number> {
         .from('social_profiles')
         .select('id, social_id, social_url, talent_id, name')
         .eq('social_type', 'Spotify')
-        .is('status', null)
+        .is('last_processed', null)
         .limit(BATCH_SIZE);
 
     if (error) {

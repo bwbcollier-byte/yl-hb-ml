@@ -24,7 +24,8 @@
     "airtable": "^0.12.2",
     "csv-parser": "^3.2.0",
     "dotenv": "^16.4.1",
-    "node-fetch": "^2.7.0"
+    "node-fetch": "^2.7.0",
+    "supabase": "^2.76.16"
   },
   "devDependencies": {
     "@types/node": "^20.11.5",
