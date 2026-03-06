@@ -1,32 +1,22 @@
 {
-  "name": "hb-data-musicartists",
+  "name": "yl-hb-ml",
   "version": "1.0.0",
-  "description": "Consolidated music artist enrichment with Spotify and MusicBrainz",
-  "main": "dist/index.js",
+  "description": "Musiclinkss enrichment pipeline for social and media profiles",
+  "main": "dist/ml-social-enrichment.js",
   "scripts": {
-    "start": "ts-node src/index.ts",
-    "musicbrainz": "ts-node src/musicbrainz-artist-enrichment.ts",
-    "adb": "ts-node src/audiodb-artist-enrichment.ts",
-    "rovi": "ts-node src/rovi-artist-enrichment.ts",
-    "musicfetch": "ts-node src/musicfetch-artist-enrichment.ts",
-    "enrich-spotify": "ts-node src/social-enrich-spotify.ts",
     "build": "tsc",
-    "dev": "ts-node src/index.ts"
+    "social": "ts-node src/ml-social-enrichment.ts",
+    "media": "ts-node src/ml-media-enrichment.ts",
+    "dev:social": "LIMIT=5 ts-node src/ml-social-enrichment.ts",
+    "dev:media": "LIMIT=5 ts-node src/ml-media-enrichment.ts"
   },
-  "keywords": [
-    "spotify",
-    "airtable",
-    "enrichment"
-  ],
+  "keywords": ["musiclinkss", "enrichment", "supabase"],
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@supabase/supabase-js": "^2.98.0",
-    "airtable": "^0.12.2",
-    "csv-parser": "^3.2.0",
+    "@supabase/supabase-js": "^2.39.0",
     "dotenv": "^16.4.1",
-    "node-fetch": "^2.7.0",
-    "supabase": "^2.76.16"
+    "node-fetch": "^2.7.0"
   },
   "devDependencies": {
     "@types/node": "^20.11.5",

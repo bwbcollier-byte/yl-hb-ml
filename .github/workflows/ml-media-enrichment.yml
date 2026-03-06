@@ -2,7 +2,7 @@ name: Music Links Media Enrichment
 
 on:
   schedule:
-    - cron: "30 5 * * *"
+    - cron: "30 5 * * *" # Daily at 5:30 AM UTC
   workflow_dispatch:
     inputs:
       record_limit:
