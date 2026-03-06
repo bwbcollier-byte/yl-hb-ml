@@ -1,0 +1,21 @@
+{
+  "name": "yl-hb-ml",
+  "version": "1.0.0",
+  "description": "Musiclinkss enrichment pipeline for social and media profiles",
+  "scripts": {
+    "build": "tsc",
+    "social": "ts-node src/ml-social-enrichment.ts",
+    "media": "ts-node src/ml-media-enrichment.ts"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "dotenv": "^16.4.1",
+    "node-fetch": "^2.7.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.5",
+    "@types/node-fetch": "^2.6.11",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  }
+}
