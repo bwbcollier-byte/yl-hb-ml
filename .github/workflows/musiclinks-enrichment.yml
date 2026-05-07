@@ -45,7 +45,7 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           RAPID_API_KEY: ${{ secrets.RAPID_API_KEY }}
-        run: npx ts-node src/enrich-social-links.ts
+        run: npx tsx src/enrich-social-links.ts
       - name: Notify Supabase — result
         if: always()
         env:

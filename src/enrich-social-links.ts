@@ -1,5 +1,4 @@
 import dotenv from 'dotenv';
-import fetch from 'node-fetch';
 import { supabase } from './supabase';
 
 dotenv.config();

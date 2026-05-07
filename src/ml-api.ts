@@ -1,4 +1,3 @@
-import fetch from 'node-fetch';
 
 /**
  * Musiclinkss API client with multi-key rotation for RapidAPI.
