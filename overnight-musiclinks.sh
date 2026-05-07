@@ -7,7 +7,7 @@ echo "🏁 Starting Overnight MusicLinks Enrichment..."
 echo "📅 Date: $(date)"
 
 # Ensure we're in the right directory
-cd "$(dirname "$0")"
+cd "$(dirname "$0")" || exit 1
 
 # Run the enrichment script with npx ts-node
 # We use a larger batch size for overnight runs if needed, 

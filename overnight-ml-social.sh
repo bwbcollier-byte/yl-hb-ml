@@ -12,7 +12,7 @@ echo "   Interval: $SLEEP_SECONDS seconds"
 echo "------------------------------------------------"
 
 # Ensure dependencies are installed and code is built
-cd "$REPO_DIR"
+cd "$REPO_DIR" || exit 1
 if [ ! -d "node_modules" ]; then
     echo "📦 Installing dependencies..."
     npm install
