@@ -83,20 +83,12 @@ async function fetchMusicLinks(spotifyUrl: string, retries = 1): Promise<any> {
     }
 }
 
-function updateWorkflowLogs(existingLogs: any[] | null, entry: any) {
-    const logs = Array.isArray(existingLogs) ? [...existingLogs] : [];
-    logs.push({
-        ...entry,
-        timestamp: new Date().toISOString()
-    });
-    return logs;
-}
 
 async function processBatch(): Promise<number> {
     const { data: profiles, error } = await supabase
-        .from('social_profiles')
-        .select('id, talent_id, social_url, workflow_logs, name')
-        .eq('social_type', 'Spotify')
+        .from('hb_socials')
+        .select('id, linked_talent, social_url, name')
+        .eq('type', 'Spotify')
         .in('status', [null, 'active'])
         .not('social_url', 'is', null)
         .limit(BATCH_SIZE);
@@ -115,38 +107,25 @@ async function processBatch(): Promise<number> {
         if (!data || !data.links) {
             console.log(`   ⚠️ Skipping ${profile.name} due to persistent API error/no data.`);
             
-            const errorEntry = {
-                action: 'social_enrichment_musiclinks_failed',
-                error: 'API 500 or No Data',
-                spotify_source: profile.social_url
-            };
-
-            // Update Talent Logs
-            const { data: talent } = await supabase.from('talent_profiles').select('workflow_logs').eq('id', profile.id).single();
-            const updatedTalentLogs = updateWorkflowLogs(talent?.workflow_logs, errorEntry);
-            await supabase.from('talent_profiles').update({ workflow_logs: updatedTalentLogs }).eq('id', profile.id);
-
-            // Update Social Logs and Status
-            const updatedSpotifyLogs = updateWorkflowLogs(profile.workflow_logs, errorEntry);
-            await supabase.from('social_profiles').update({ 
+            // Update Social Status
+            await supabase.from('hb_socials').update({
                 status: 'Error',
-                workflow_logs: updatedSpotifyLogs,
                 updated_at: new Date().toISOString()
             }).eq('id', profile.id);
             
             continue;
         }
 
-        const talentId = profile.talent_id;
+        const talentId = profile.linked_talent;
         const links = data.links;
         const discoveredPlatforms = Object.keys(links);
-        
+
         const { data: existingSocials } = await supabase
-            .from('social_profiles')
-            .select('social_type, social_url')
-            .eq('talent_id', talentId);
-            
-        const existingMap = new Set(existingSocials?.map(s => `${s.social_type}:${s.social_url}`) || []);
+            .from('hb_socials')
+            .select('type, social_url')
+            .eq('linked_talent', talentId);
+
+        const existingMap = new Set(existingSocials?.map(s => `${s.type}:${s.social_url}`) || []);
 
         const newProfiles: any[] = [];
         for (const [apiType, url] of Object.entries(links)) {
@@ -155,10 +134,10 @@ async function processBatch(): Promise<number> {
             
             if (!existingMap.has(`${dbType}:${url}`)) {
                 newProfiles.push({
-                    talent_id: talentId,
-                    social_type: dbType,
+                    linked_talent: talentId,
+                    type: dbType,
                     social_url: url,
-                    social_id: extractIdFromUrl(url as string, dbType),
+                    identifier: extractIdFromUrl(url as string, dbType),
                     name: profile.name,
                     linking_status: 'done',
                     created_at: new Date().toISOString(),
@@ -168,27 +147,13 @@ async function processBatch(): Promise<number> {
         }
 
         if (newProfiles.length > 0) {
-            const { error: insertError } = await supabase.from('social_profiles').insert(newProfiles);
+            const { error: insertError } = await supabase.from('hb_socials').insert(newProfiles);
             if (insertError) console.error(`   ❌ Failed to insert new socials:`, insertError.message);
             else console.log(`   ✅ Created ${newProfiles.length} new social profiles.`);
         }
 
-        const { data: talent } = await supabase.from('talent_profiles').select('workflow_logs').eq('id', talentId).single();
-        const updatedTalentLogs = updateWorkflowLogs(talent?.workflow_logs, {
-            action: 'social_enrichment_musiclinks',
-            platforms: discoveredPlatforms,
-            spotify_source: profile.social_url,
-            new_records: newProfiles.length
-        });
-        await supabase.from('talent_profiles').update({ workflow_logs: updatedTalentLogs }).eq('id', talentId);
-
-        const updatedSpotifyLogs = updateWorkflowLogs(profile.workflow_logs, {
-            action: 'enriched_by_musiclinks',
-            status: 'completed'
-        });
-        await supabase.from('social_profiles').update({
+        await supabase.from('hb_socials').update({
             status: 'Done',
-            workflow_logs: updatedSpotifyLogs,
             updated_at: new Date().toISOString()
         }).eq('id', profile.id);
 

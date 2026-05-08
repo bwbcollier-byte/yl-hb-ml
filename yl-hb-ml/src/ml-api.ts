@@ -1,4 +1,3 @@
-import fetch from 'node-fetch';
 
 const RAPIDAPI_HOST = 'musiclinkssapi.p.rapidapi.com';
 const BASE_URL = `https://${RAPIDAPI_HOST}`;

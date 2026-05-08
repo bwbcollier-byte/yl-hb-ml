@@ -15,11 +15,9 @@ async function processMedia() {
 
     // 1. Find Media Profiles with Spotify URLs to enrich
     const { data: mediaRecords, error: fetchError } = await supabase
-        .from('media_profiles')
-        .select('id, talent_profile_id, spotify_album_url, album_name')
-        .not('spotify_album_url', 'is', null)
-        .order('ml_check', { ascending: true, nullsFirst: true })
-        .order('last_processed', { ascending: true })
+        .from('hb_media')
+        .select('id, talent_profile_id, soc_spotify, name')
+        .not('soc_spotify', 'is', null)
         .limit(LIMIT);
 
     if (fetchError) {
@@ -39,52 +37,34 @@ async function processMedia() {
 
     for (const record of mediaRecords) {
         processedCount++;
-        console.log(`[${processedCount}/${mediaRecords.length}] Processing Album: ${record.album_name || record.id}`);
+        console.log(`[${processedCount}/${mediaRecords.length}] Processing Album: ${record.name || record.id}`);
 
-        if (!record.spotify_album_url) {
+        if (!record.soc_spotify) {
             continue;
         }
 
-        const mlData = await fetchMusicLinks(record.spotify_album_url);
+        const mlData = await fetchMusicLinks(record.soc_spotify);
 
         if (!mlData) {
-            console.log(`   ⚠️ API failed for ${record.spotify_album_url}`);
-            await supabase.from('media_profiles').update({ 
-                ml_check: 'failed'
-            }).eq('id', record.id);
+            console.log(`   ⚠️ API failed for ${record.soc_spotify}`);
             continue;
         }
 
         // Map Music Links to database columns
         const updates: any = {
-            ml_check: 'success',
-            last_processed: new Date().toISOString(),
             updated_at: new Date().toISOString()
         };
 
         if (mlData.links) {
-            if (mlData.links.Deezer) updates.deezer_url = mlData.links.Deezer;
-            if (mlData.links.Apple) updates.apple_music_url = mlData.links.Apple;
-            if (mlData.links.Youtube) updates.youtube_music_url = mlData.links.Youtube;
-            if (mlData.links.Tidal) updates.tidal_url = mlData.links.Tidal;
-            if (mlData.links.Soundcloud) updates.soundcloud_url = mlData.links.Soundcloud;
-            if (mlData.links.Amazon) updates.amazon_music_url = mlData.links.Amazon;
-            if (mlData.links.Bandcamp) updates.bandcamp_url = mlData.links.Bandcamp;
-            // itunes_url might be different from apple_music_url in some cases but often same
-            if (mlData.links.Apple) updates.itunes_url = mlData.links.Apple.replace('music.apple.com', 'itunes.apple.com');
+            if (mlData.links.Deezer) updates.soc_deezer = mlData.links.Deezer;
+            if (mlData.links.Apple) updates.soc_apple_music = mlData.links.Apple;
+            if (mlData.links.Youtube) updates.soc_youtube_music = mlData.links.Youtube;
+            if (mlData.links.Tidal) updates.soc_tidal = mlData.links.Tidal;
+            if (mlData.links.Soundcloud) updates.soc_soundcloud = mlData.links.Soundcloud;
+            if (mlData.links.Amazon) updates.soc_amazon = mlData.links.Amazon;
         }
 
-        // Add to workflow logs
-        const { data: current } = await supabase.from('media_profiles').select('workflow_logs').eq('id', record.id).single();
-        const logs = current?.workflow_logs || {};
-        logs['MusicLinks'] = {
-            last_run: new Date().toISOString(),
-            status: 'success',
-            links_found: Object.keys(mlData.links || {}).length
-        };
-        updates.workflow_logs = logs;
-
-        const { error: updateError } = await supabase.from('media_profiles').update(updates).eq('id', record.id);
+        const { error: updateError } = await supabase.from('hb_media').update(updates).eq('id', record.id);
 
         if (updateError) {
             console.error(`   ❌ Update error:`, updateError.message);

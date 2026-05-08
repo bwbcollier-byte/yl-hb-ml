@@ -16,11 +16,9 @@ async function processProfiles() {
     // 1. Find Spotify profiles to process
     // We prioritize those never checked, then oldest checked
     const { data: spotifyProfiles, error: fetchError } = await supabase
-        .from('social_profiles')
-        .select('id, talent_id, social_url, social_id')
-        .eq('social_type', 'Spotify')
-        .order('ml_check', { ascending: true, nullsFirst: true })
-        .order('last_processed', { ascending: true })
+        .from('hb_socials')
+        .select('id, linked_talent, social_url, identifier')
+        .eq('type', 'Spotify')
         .limit(LIMIT);
 
     if (fetchError) {
@@ -41,65 +39,47 @@ async function processProfiles() {
 
     for (const profile of spotifyProfiles) {
         processedCount++;
-        console.log(`[${processedCount}/${spotifyProfiles.length}] Processing Spotify profile: ${profile.social_id || profile.id}`);
+        console.log(`[${processedCount}/${spotifyProfiles.length}] Processing Spotify profile: ${profile.identifier || profile.id}`);
 
         if (!profile.social_url) {
             console.log(`   ⚠️ Skip: No social_url`);
             continue;
         }
 
-        const talentId = profile.talent_id;
+        const talentId = profile.linked_talent;
         const mlData = await fetchMusicLinks(profile.social_url);
 
         if (!mlData) {
             console.log(`   ⚠️ API failed for ${profile.social_url}`);
-            // Update last_checked even if failed to avoid infinite loop
-            await supabase.from('social_profiles').update({ 
-                ml_check: 'failed',
-                last_checked: new Date().toISOString()
-            }).eq('id', profile.id);
             continue;
         }
 
         // 2. Manage "Music Links" record
         const { data: mlProfile } = await supabase
-            .from('social_profiles')
+            .from('hb_socials')
             .select('id')
-            .eq('talent_id', talentId)
-            .eq('social_type', 'Music Links')
+            .eq('linked_talent', talentId)
+            .eq('type', 'Music Links')
             .single();
 
         const mlUpdate = {
-            social_about: mlData.description || null,
-            social_image: mlData.image || null,
+            description: mlData.description || null,
+            image: mlData.image || null,
             name: mlData.title || null,
-            last_processed: new Date().toISOString(),
-            last_checked: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-            ml_check: 'success',
-            workflow_logs: {
-                last_run: new Date().toISOString(),
-                workflow: WORKFLOW_NAME,
-                status: 'updated'
-            }
+            updated_at: new Date().toISOString()
         };
 
         if (mlProfile) {
-            await supabase.from('social_profiles').update(mlUpdate).eq('id', mlProfile.id);
+            await supabase.from('hb_socials').update(mlUpdate).eq('id', mlProfile.id);
             updatedCount++;
             console.log(`   ✅ Updated "Music Links" profile: ${mlProfile.id}`);
         } else {
-            await supabase.from('social_profiles').insert({
+            await supabase.from('hb_socials').insert({
                 ...mlUpdate,
-                talent_id: talentId,
-                social_type: 'Music Links',
-                social_id: mlData.id || profile.social_id,
-                social_url: profile.social_url, // Use Spotify URL as base link
-                workflow_logs: {
-                    last_run: new Date().toISOString(),
-                    workflow: WORKFLOW_NAME,
-                    status: 'created'
-                }
+                linked_talent: talentId,
+                type: 'Music Links',
+                identifier: mlData.id || profile.identifier,
+                social_url: profile.social_url // Use Spotify URL as base link
             });
             createdCount++;
             console.log(`   ✨ Created "Music Links" profile`);
@@ -112,34 +92,23 @@ async function processProfiles() {
 
                 // Check if this specific platform link already exists for this talent
                 const { data: existing } = await supabase
-                    .from('social_profiles')
+                    .from('hb_socials')
                     .select('id')
-                    .eq('talent_id', talentId)
-                    .eq('social_type', platform)
+                    .eq('linked_talent', talentId)
+                    .eq('type', platform)
                     .single();
 
                 if (!existing) {
-                    await supabase.from('social_profiles').insert({
-                        talent_id: talentId,
-                        social_type: platform,
+                    await supabase.from('hb_socials').insert({
+                        linked_talent: talentId,
+                        type: platform,
                         social_url: url,
-                        status: 'active',
-                        workflow_logs: {
-                            created_by: WORKFLOW_NAME,
-                            timestamp: new Date().toISOString()
-                        }
+                        status: 'active'
                     });
                     console.log(`   ➕ Created ${platform} profile: ${url}`);
                 }
             }
         }
-
-        // 4. Mark Spotify profile as processed
-        await supabase.from('social_profiles').update({
-            ml_check: 'success',
-            last_processed: new Date().toISOString(),
-            last_checked: new Date().toISOString()
-        }).eq('id', profile.id);
 
         await sleep(200);
     }
