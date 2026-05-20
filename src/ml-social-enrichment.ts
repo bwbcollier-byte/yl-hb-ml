@@ -59,7 +59,7 @@ async function processProfiles() {
             .from('hb_socials')
             .select('id')
             .eq('linked_talent', talentId)
-            .eq('type', 'Music Links')
+            .eq('type', 'MUSICLINKS')
             .single();
 
         const mlUpdate = {
@@ -77,7 +77,7 @@ async function processProfiles() {
             await supabase.from('hb_socials').insert({
                 ...mlUpdate,
                 linked_talent: talentId,
-                type: 'Music Links',
+                type: 'MUSICLINKS',
                 identifier: mlData.id || profile.identifier,
                 social_url: profile.social_url // Use Spotify URL as base link
             });
@@ -95,13 +95,13 @@ async function processProfiles() {
                     .from('hb_socials')
                     .select('id')
                     .eq('linked_talent', talentId)
-                    .eq('type', platform)
+                    .eq('type', platform.toUpperCase())
                     .single();
 
                 if (!existing) {
                     await supabase.from('hb_socials').insert({
                         linked_talent: talentId,
-                        type: platform,
+                        type: platform.toUpperCase(),
                         social_url: url,
                         status: 'active'
                     });
