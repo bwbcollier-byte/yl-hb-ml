@@ -18,7 +18,7 @@ async function processProfiles() {
     const { data: spotifyProfiles, error: fetchError } = await supabase
         .from('hb_socials')
         .select('id, linked_talent, social_url, identifier')
-        .eq('type', 'Spotify')
+        .eq('type', 'SPOTIFY')
         .limit(LIMIT);
 
     if (fetchError) {

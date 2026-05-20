@@ -88,7 +88,7 @@ async function processBatch(): Promise<number> {
     const { data: profiles, error } = await supabase
         .from('hb_socials')
         .select('id, linked_talent, social_url, name')
-        .eq('type', 'Spotify')
+        .eq('type', 'SPOTIFY')
         .in('status', [null, 'active'])
         .not('social_url', 'is', null)
         .limit(BATCH_SIZE);
